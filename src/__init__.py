@@ -36,12 +36,8 @@ async def on_startup(app: FastAPI) -> None:
 async def on_shutdown(app: FastAPI) -> None:
     """Cerrar conexiones al apagar."""
     dal = app.state.db
-    # FIX: no existe close_session; mejor disponer el engine
-    try:
-        dal.engine.dispose()
-    except Exception:
-        pass
-    log.info("DB session/engine disposed.")
+    dal.close_session()
+    log.info("DB session closed.")
 
 
 # -------------------------------------------------------------------

@@ -10,8 +10,10 @@ from dotenv import load_dotenv
 Base = declarative_base()
 load_dotenv()
 
+
 class DataAccessLayer:
     """Administra engine y session factory."""
+
     def __init__(self):
         sql_database_url: URL = URL.create(
             'postgresql+psycopg2',
@@ -50,3 +52,9 @@ class DataAccessLayer:
 
     def create_tables(self) -> None:
         Base.metadata.create_all(self.engine)
+
+    def close_session(self) -> None:
+        try:
+            self.engine.dispose(close=True)
+        except Exception:
+            pass

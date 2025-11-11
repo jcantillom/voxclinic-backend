@@ -1,13 +1,11 @@
 from typing import List
-from fastapi import APIRouter, Depends, status, Query
+from fastapi import APIRouter, Depends, status, Query, Response
 from sqlalchemy.orm import Session
 from src.core.connections.deps import get_db, get_current_tenant, get_current_user
 from .schemas import UserCreate, UserOut, UserUpdateName, UserUpdateActive, UserChangePassword
 from .services import UserService
 from .repository import UserRepository
-from src.core.middlewares.authorization import require_roles
-
-owner_admin = require_roles("owner", "admin")
+from src.core.middlewares.permissions import require_roles
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -22,13 +20,13 @@ def get_service() -> UserService:
     response_model=UserOut,
     status_code=status.HTTP_201_CREATED,
     summary="Crear usuario",
+    dependencies=[Depends(require_roles("owner", "admin"))],
 )
 def create_user(
         payload: UserCreate,
         db: Session = Depends(get_db),
         tenant=Depends(get_current_tenant),
         _=Depends(get_current_user),
-        _role=Depends(owner_admin),
 ):
     svc = get_service()
     u = svc.create_user(db,
@@ -41,45 +39,54 @@ def create_user(
     return UserOut.model_validate(u)
 
 
-@router.get("", summary="Listar usuarios del tenant")
+@router.get(
+    "",
+    response_model=List[UserOut],
+    summary="Listar usuarios del tenant",
+    dependencies=[Depends(require_roles("owner", "admin"))],
+)
 def list_users(
-        page: int = Query(1, ge=1),
-        page_size: int = Query(20, ge=1, le=200),
-        role: str | None = Query(None, pattern="^(owner|admin|staff|viewer)$"),
-        q: str | None = Query(None, description="Buscar por email o nombre"),
+        response: Response,
         db: Session = Depends(get_db),
         tenant=Depends(get_current_tenant),
         _=Depends(get_current_user),
-        _role=Depends(owner_admin),
+        q: str | None = Query(None, description="Buscar por email/full_name"),
+        role: str | None = Query(None, pattern="^(owner|admin|staff|viewer)$"),
+        is_active: bool | None = Query(None),
+        page: int = Query(1, ge=1),
+        page_size: int = Query(50, ge=1, le=200),
 ):
     svc = get_service()
-    rows, total = svc.list_users(db, tenant=tenant, page=page, page_size=page_size, role=role, q=q)
-    return {
-        "items": [UserOut.model_validate(x) for x in rows],
-        "page": page,
-        "page_size": page_size,
-        "total": total
-    }
+    rows, total = svc.search_users(
+        db, tenant=tenant, q=q, role=role, is_active=is_active, page=page, page_size=page_size
+    )
+    response.headers["X-Total-Count"] = str(total)
+    return [UserOut.model_validate(x) for x in rows]
 
 
+# Update nombre: permitir al propio usuario o a admin/owner (regla en línea)
 @router.put(
     "/{user_id}/name",
     response_model=UserOut,
-    summary="Actualizar nombre completo del usuario"
+    summary="Actualizar nombre completo del usuario",
 )
 def update_full_name(
         user_id: str,
         payload: UserUpdateName,
         db: Session = Depends(get_db),
         tenant=Depends(get_current_tenant),
-        svc: UserService = Depends(get_service),
-        _role=Depends(owner_admin),
+        me=Depends(get_current_user),
+        svc: UserService = Depends(get_service)
 ):
-    # obtenemos usuario
     user = svc.repo.get_by_id(db, user_id)
     if not user or str(user.tenant_id) != str(tenant.id):
         from src.core.errors.errors import EntityNotFoundError
         raise EntityNotFoundError("User", "id", user_id)
+
+    # regla: puede si (me.id == user.id) o me.role in owner/admin
+    if str(me.id) != str(user.id) and me.role not in ("owner", "admin"):
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
 
     updated = svc.update_full_name(db, user=user, full_name=payload.full_name)
     return UserOut.model_validate(updated)
@@ -88,18 +95,19 @@ def update_full_name(
 # ============================================================
 # Activate / Deactivate User
 # ============================================================
+# Activar/Desactivar usuario: solo owner/admin
 @router.put(
     "/{user_id}/active",
     response_model=UserOut,
-    summary="Activar o desactivar usuario"
+    summary="Activar o desactivar usuario",
+    dependencies=[Depends(require_roles("owner", "admin"))],
 )
 def update_user_active(
         user_id: str,
         payload: UserUpdateActive,
         db: Session = Depends(get_db),
         tenant=Depends(get_current_tenant),
-        svc: UserService = Depends(get_service),
-        _role=Depends(owner_admin),
+        svc: UserService = Depends(get_service)
 ):
     user = svc.repo.get_by_id(db, user_id)
     if not user or str(user.tenant_id) != str(tenant.id):
