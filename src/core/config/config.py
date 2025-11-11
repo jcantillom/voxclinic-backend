@@ -9,13 +9,17 @@ class Environment(BaseSettings):
     are in the .env file are the same as those that are in the class.
     """
     APP_ENV: str
+    API_PORT: int
     DB_HOST: str
     DB_PORT: str
     DB_USERNAME: str
     DB_PASSWORD: str
     DB_DATABASE: str
     ALEMBIC_DATABASE_URL: str
-
+    LOG_COLOR: str
+    LOG_LEVEL: str
+    JWT_SECRET: str
+    JWT_EXPIRES_MIN: int
 
     class Config:
         env_file = os.path.join(os.getcwd(), ".env")

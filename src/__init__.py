@@ -1,64 +1,102 @@
-from fastapi import FastAPI, Depends, HTTPException
+# src/__init__.py
+from fastapi import FastAPI, Request, HTTPException, status, Depends
+from fastapi.responses import JSONResponse
 from starlette_context import plugins
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette_context.middleware import RawContextMiddleware
-from src.core.config.app_config import config_by_name, Config
-from src.core.connections.database import DataAccessLayer
+from pydantic import ValidationError
 import asyncio
-from src.core.errors.http_error_handler import HTTPErrorHandler
+import logging
+import time
 
+from src.core.config.app_config import config_by_name
+from src.core.connections.database import DataAccessLayer
+
+# -------------------------------------------------------------------
+#                         Rutas de dominio
+# -------------------------------------------------------------------
 from src.apps.tenant.controller import router as tenant_router
+from src.apps.users.controller import router as user_router
+from src.apps.auth.controller import router as auth_router
+
+log = logging.getLogger("app")
 
 
+# -------------------------------------------------------------------
+# Lifecycle
+# -------------------------------------------------------------------
 async def on_startup(app: FastAPI) -> None:
-    """
-    Esta función se llama cuando la aplicación inicia,
-    se encarga de crear las tablas en la base de datos.
-    """
+    """Crear tablas al iniciar."""
     dal = app.state.db
     dal.create_tables()
+    log.info("DB tables ensured.")
 
 
 async def on_shutdown(app: FastAPI) -> None:
-    """
-    Esta función se llama cuando la aplicación se detiene,
-    se encarga de cerrar la conexión con la base de datos.
-    """
+    """Cerrar conexiones al apagar."""
     dal = app.state.db
     dal.close_session()
+    log.info("DB session closed.")
 
 
+# -------------------------------------------------------------------
+# Middleware solo-DEBUG para ver body y tiempos
+# -------------------------------------------------------------------
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+class DebugRequestLogMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if log.isEnabledFor(logging.DEBUG):
+            try:
+                raw = await request.body()
+                preview = raw.decode() if raw else "<empty>"
+            except Exception:
+                preview = "<unreadable>"
+            log.debug("REQ %s %s body=%s", request.method, request.url.path, preview)
+
+        start = time.time()
+        response = await call_next(request)
+        dur_ms = (time.time() - start) * 1000
+
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug(
+                "RES %s %s status=%s time=%.2fms",
+                request.method, request.url.path, response.status_code, dur_ms
+            )
+        return response
+
+
+# -------------------------------------------------------------------
+# Factory
+# -------------------------------------------------------------------
 def create_app(config_name: str) -> FastAPI:
     """
-    Esta función crea la aplicación FastAPI con la configuración especificada.
-    :param config_name: Nombre de la configuración a utilizar.
-    :return: Instancia de la aplicación FastAPI.
+    Crea la app FastAPI con la config indicada.
     """
-
+    # Contexto por request (request_id, correlation_id)
     ctx_middleware = Middleware(
         RawContextMiddleware,
         plugins=(
             plugins.CorrelationIdPlugin(),
-            plugins.RequestIdPlugin()
-        )
+            plugins.RequestIdPlugin(),
+        ),
     )
 
-    # Crea una instancia de la configuración especificada
-    config_instance = config_by_name[config_name]
+    cfg = config_by_name[config_name]
 
     app = FastAPI(
-        **config_instance.dict(),
-        middleware=[
-            ctx_middleware,
-        ],
+        **cfg.dict(),  # title, description, version, debug, etc.
+        middleware=[ctx_middleware],
         on_startup=[lambda: asyncio.create_task(on_startup(app))],
-        on_shutdown=[lambda: asyncio.create_task(on_shutdown(app))]
+        on_shutdown=[lambda: asyncio.create_task(on_shutdown(app))],
     )
-    # Inicializa la conexión con la base de datos
+
+    # DB
     app.state.db = DataAccessLayer()
 
-    # Add CORS middleware
+    # CORS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -67,20 +105,62 @@ def create_app(config_name: str) -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Debug request/response (solo si LOG_LEVEL=DEBUG)
+    app.add_middleware(DebugRequestLogMiddleware)
+
+    # -------------------------------------------------------------------
+    # Exception Handlers: muestran la causa real en consola
+    # -------------------------------------------------------------------
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        log.warning(
+            "HTTPException %s %s -> %s | detail=%s",
+            request.method, request.url.path, exc.status_code, exc.detail
+        )
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    @app.exception_handler(ValidationError)
+    async def validation_exception_handler(request: Request, exc: ValidationError):
+        log.warning(
+            "ValidationError %s %s -> 422 | errors=%s",
+            request.method, request.url.path, exc.errors()
+        )
+        return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            content={"detail": exc.errors()})
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception):
+        # imprime traceback completo
+        log.exception("Unhandled %s %s -> 500", request.method, request.url.path)
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            content={"detail": "Internal Server Error"})
+
+    # -------------------------------------------------------------------
+    # Rutas base
+    # -------------------------------------------------------------------
     @app.get("/")
     async def root():
-        """
-        Ruta inicial de la aplicación.
-        """
-        return {
-            "message": "🚀 Server is running"
-        }
+        return {"message": "🚀 Server is running"}
 
-    # Add routes
+    # -------------------------------------------------------------------
+    #                          Rutas de dominio
+    # -------------------------------------------------------------------
     app.include_router(
         tenant_router,
         prefix="/api/v1",
         tags=["Tenants"],
+    )
+
+    app.include_router(
+        user_router,
+        prefix="/api/v1",
+        tags=["Users"],
+    )
+
+    app.include_router(
+        auth_router,
+        prefix="/api/v1",
+        tags=["Auth"],
     )
 
     return app
