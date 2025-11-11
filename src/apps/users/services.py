@@ -13,7 +13,15 @@ class UserService:
     # =================================================
     # Create
     # =================================================
-    def create_user(self, db: Session, *, tenant: Tenant, email: str, full_name: str, role: str, password: str) -> User:
+    def create_user(
+            self,
+            db: Session,
+            *,
+            tenant: Tenant,
+            email: str,
+            full_name: str,
+            role: str,
+            password: str) -> User:
         if self.repo.get_by_email(db, tenant.id, email):
             raise EntityAlreadyExistsError("User", "email", email)
         pwd_hash = get_password_hash(password)
@@ -32,6 +40,6 @@ class UserService:
     def update_full_name(self, db: Session, *, user: User, full_name: str) -> User:
         return self.repo.update_name(db, user, full_name)
 
-    def deactivate(self, db: Session, *, user: User) -> bool:
-        self.repo.set_active(db, user, False)
-        return True
+    def set_active(self, db: Session, *, user: User, active: bool) -> User:
+        """Activa/Desactiva y devuelve siempre el usuario actualizado."""
+        return self.repo.set_active(db, user, active)

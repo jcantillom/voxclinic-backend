@@ -30,3 +30,10 @@ class UserOut(BaseModel):
     last_login: Optional[datetime]
     created_at: datetime
     updated_at: datetime
+
+class UserUpdateName(BaseModel):
+    full_name: str = Field(..., max_length=255)
+
+
+class UserUpdateActive(BaseModel):
+    is_active: bool
