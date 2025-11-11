@@ -7,10 +7,32 @@ from .models import User
 class UserRepository:
 
     @staticmethod
-    def list_by_tenant(db: Session, tenant_id) -> Sequence[User]:
-        return db.execute(
-            select(User).where(User.tenant_id == tenant_id)
-        ).scalars().all()
+    def list_by_tenant(
+            db: Session,
+            tenant_id,
+            *,
+            page: int = 1,
+            page_size: int = 20,
+            role: str | None = None,
+            q: str | None = None,
+    ) -> tuple[list[User], int]:
+        stmt = select(User).where(User.tenant_id == tenant_id)
+
+        if role:
+            stmt = stmt.where(User.role == role)
+
+        if q:
+            like = f"%{q}%"
+            stmt = stmt.where(or_(User.email.ilike(like), User.full_name.ilike(like)))
+
+        # total
+        total = db.execute(stmt.with_only_columns(User.id)).scalars().all()
+        total_count = len(total)
+
+        # page
+        offset = (page - 1) * page_size
+        rows = db.execute(stmt.order_by(User.created_at.desc()).offset(offset).limit(page_size)).scalars().all()
+        return rows, total_count
 
     @staticmethod
     def get_by_id(db: Session, user_id: str) -> Optional[User]:
