@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status, HTTPException
 from sqlalchemy.orm import Session
 from src.core.connections.deps import get_db, get_current_tenant, get_current_user
 from src.core.middlewares.permissions import require_roles

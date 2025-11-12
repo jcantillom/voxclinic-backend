@@ -36,7 +36,8 @@ class RecordingRepository:
 
     @staticmethod
     def get_by_id(db: Session, recording_id: str) -> Recording | None:
-        return db.get(Recording, recording_id)
+        r = db.get(Recording, recording_id)
+        return r
 
     @staticmethod
     def set_status(db: Session, recording: Recording, status: str, error_message: str | None = None) -> Recording:
