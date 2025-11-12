@@ -20,6 +20,9 @@ class Environment(BaseSettings):
     LOG_LEVEL: str
     JWT_SECRET: str
     JWT_EXPIRES_MIN: int
+    AWS_REGION: str
+    S3_BUCKET_AUDIO: str
+    AWS_PROFILE: str
 
     class Config:
         env_file = os.path.join(os.getcwd(), ".env")
