@@ -33,3 +33,26 @@ class RecordingRepository:
             stmt.order_by(Recording.created_at.desc()).offset(offset).limit(page_size)
         ).scalars().all()
         return rows, total
+
+    @staticmethod
+    def get_by_id(db: Session, recording_id: str) -> Recording | None:
+        return db.get(Recording, recording_id)
+
+    @staticmethod
+    def set_status(db: Session, recording: Recording, status: str, error_message: str | None = None) -> Recording:
+        recording.status = status
+        recording.error_message = error_message
+        db.flush();
+        db.refresh(recording)
+        return recording
+
+    @staticmethod
+    def attach_transcript(db: Session, recording: Recording, transcript_text: str,
+                          duration_sec: int | None = None) -> Recording:
+        recording.transcript_text = transcript_text
+        if duration_sec is not None:
+            recording.duration_sec = duration_sec
+        recording.status = "completed"
+        db.flush();
+        db.refresh(recording)
+        return recording

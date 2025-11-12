@@ -27,3 +27,13 @@ class RecordingOut(BaseModel):
     error_message: Optional[str]
     created_at: datetime
     updated_at: datetime
+
+
+class RecordingUpdateStatus(BaseModel):
+    status: str = Field(..., pattern="^(uploaded|processing|completed|failed)$")
+    error_message: str | None = None
+
+
+class RecordingAttachTranscript(BaseModel):
+    transcript_text: str = Field(..., min_length=1)
+    duration_sec: int | None = None

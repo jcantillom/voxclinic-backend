@@ -3,11 +3,20 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 from src.core.connections.deps import get_db, get_current_tenant, get_current_user
 from src.core.middlewares.permissions import require_roles
-from .schemas import RecordingCreate, RecordingOut
+from .schemas import RecordingCreate, RecordingOut, RecordingUpdateStatus, RecordingAttachTranscript
 from .services import RecordingService
 from .repository import RecordingRepository
 
 router = APIRouter(prefix="/recordings", tags=["recordings"])
+
+ALLOWED_CT = {
+    "audio/wav",
+    "audio/x-wav",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/webm",
+    "audio/ogg",
+}
 
 
 def get_service() -> RecordingService:
@@ -27,6 +36,12 @@ def register_recording(
         tenant=Depends(get_current_tenant),
         me=Depends(get_current_user),
 ):
+    if payload.content_type not in ALLOWED_CT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"content_type '{payload.content_type}' no es soportado. "
+                   f"Los tipos permitidos son: {', '.join(ALLOWED_CT)}"
+        )
     svc = get_service()
     r = svc.register_upload(
         db,
@@ -61,3 +76,64 @@ def list_recordings(
     rows, total = svc.list(db, tenant=tenant, q=q, status=status_q, page=page, page_size=page_size)
     response.headers["X-Total-Count"] = str(total)
     return [RecordingOut.model_validate(x) for x in rows]
+
+
+@router.get(
+    "/{recording_id}",
+    response_model=RecordingOut,
+    summary="Obtener recording por id",
+    dependencies=[Depends(require_roles("owner", "admin", "staff", "viewer"))],
+)
+def get_recording(
+        recording_id: str,
+        db: Session = Depends(get_db),
+        tenant=Depends(get_current_tenant),
+        _=Depends(get_current_user),
+        svc: RecordingService = Depends(get_service)
+):
+    r = svc.get(db, recording_id)
+    if not r or str(r.tenant_id) != str(tenant.id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+    return RecordingOut.model_validate(r)
+
+
+@router.put(
+    "/{recording_id}/status",
+    response_model=RecordingOut,
+    summary="Actualizar estado del recording",
+    dependencies=[Depends(require_roles("owner", "admin", "staff"))],
+)
+def update_recording_status(
+        recording_id: str,
+        payload: RecordingUpdateStatus,
+        db: Session = Depends(get_db),
+        tenant=Depends(get_current_tenant),
+        _=Depends(get_current_user),
+        svc: RecordingService = Depends(get_service)
+):
+    r = svc.get(db, recording_id)
+    if not r or str(r.tenant_id) != str(tenant.id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+    r = svc.update_status(db, r, payload.status, payload.error_message)
+    return RecordingOut.model_validate(r)
+
+
+@router.put(
+    "/{recording_id}/transcript",
+    response_model=RecordingOut,
+    summary="Adjuntar transcripción (marca completed)",
+    dependencies=[Depends(require_roles("owner", "admin", "staff"))],
+)
+def attach_transcript(
+        recording_id: str,
+        payload: RecordingAttachTranscript,
+        db: Session = Depends(get_db),
+        tenant=Depends(get_current_tenant),
+        _=Depends(get_current_user),
+        svc: RecordingService = Depends(get_service)
+):
+    r = svc.get(db, recording_id)
+    if not r or str(r.tenant_id) != str(tenant.id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+    r = svc.set_transcript(db, r, payload.transcript_text, payload.duration_sec)
+    return RecordingOut.model_validate(r)

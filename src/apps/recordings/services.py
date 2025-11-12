@@ -26,6 +26,31 @@ class RecordingService:
         )
 
     def list(
-            self, db: Session, *, tenant: Tenant, q=None, status=None, page=1, page_size=50
+            self,
+            db: Session,
+            *,
+            tenant: Tenant,
+            q=None,
+            status=None,
+            page=1,
+            page_size=50
     ):
-        return self.repo.list_by_tenant(db, tenant.id, q=q, status=status, page=page, page_size=page_size)
+        return self.repo.list_by_tenant(
+            db,
+            tenant.id,
+            q=q,
+            status=status,
+            page=page,
+            page_size=page_size,
+        )
+
+    def get(self, db: Session, recording_id: str) -> Recording | None:
+        return self.repo.get_by_id(db, recording_id)
+
+    def update_status(self, db: Session, recording: Recording, status: str,
+                      error_message: str | None = None) -> Recording:
+        return self.repo.set_status(db, recording, status, error_message)
+
+    def set_transcript(self, db: Session, recording: Recording, transcript_text: str,
+                       duration_sec: int | None = None) -> Recording:
+        return self.repo.attach_transcript(db, recording, transcript_text, duration_sec)
