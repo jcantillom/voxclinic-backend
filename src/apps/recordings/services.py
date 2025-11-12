@@ -1,0 +1,31 @@
+from sqlalchemy.orm import Session
+from src.apps.tenant.models import Tenant
+from src.apps.users.models import User
+from .repository import RecordingRepository
+from .models import RECORDING_STATUS, Recording
+
+
+class RecordingService:
+    def __init__(self, repo: RecordingRepository):
+        self.repo = repo
+
+    def register_upload(
+            self, db: Session, *, tenant: Tenant, user: User,
+            bucket: str, key: str, content_type: str, size_bytes: int | None, duration_sec: int | None
+    ) -> Recording:
+        return self.repo.create(
+            db,
+            tenant_id=tenant.id,
+            user_id=user.id if user else None,
+            bucket=bucket,
+            key=key,
+            content_type=content_type,
+            size_bytes=size_bytes,
+            duration_sec=duration_sec,
+            status="uploaded",
+        )
+
+    def list(
+            self, db: Session, *, tenant: Tenant, q=None, status=None, page=1, page_size=50
+    ):
+        return self.repo.list_by_tenant(db, tenant.id, q=q, status=status, page=page, page_size=page_size)

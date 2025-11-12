@@ -19,7 +19,9 @@ from src.core.connections.database import DataAccessLayer
 from src.apps.tenant.controller import router as tenant_router
 from src.apps.users.controller import router as user_router
 from src.apps.auth.controller import router as auth_router
+from src.apps.recordings.controller import router as recording_router
 
+# -------------------------------------------------------------------
 log = logging.getLogger("app")
 
 
@@ -161,6 +163,12 @@ def create_app(config_name: str) -> FastAPI:
         auth_router,
         prefix="/api/v1",
         tags=["Auth"],
+    )
+
+    app.include_router(
+        recording_router,
+        prefix="/api/v1",
+        tags=["Recordings"],
     )
 
     return app
