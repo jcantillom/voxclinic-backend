@@ -49,7 +49,7 @@ def register_recording(
         user=me,
         bucket=payload.bucket,
         key=payload.key,
-        content_type=payload.content_type,
+        content_type="audio/wav" if payload.content_type == "audio/x-wav" else payload.content_type,
         size_bytes=payload.size_bytes,
         duration_sec=payload.duration_sec,
     )

@@ -14,6 +14,25 @@ class RecordingRepository:
         return r
 
     @staticmethod
+    def get_by_unique(
+            db: Session,
+            *,
+            tenant_id,
+            bucket: str,
+            key: str,
+    ) -> Optional[Recording]:
+        """
+        Recupera un Recording por su clave única (tenant_id, bucket, key).
+        """
+        return db.execute(
+            select(Recording).where(
+                Recording.tenant_id == tenant_id,
+                Recording.bucket == bucket,
+                Recording.key == key,
+            )
+        ).scalar_one_or_none()
+
+    @staticmethod
     def list_by_tenant(
             db: Session, tenant_id, *, q: Optional[str] = None, status: Optional[str] = None,
             page: int = 1, page_size: int = 50
@@ -43,7 +62,7 @@ class RecordingRepository:
     def set_status(db: Session, recording: Recording, status: str, error_message: str | None = None) -> Recording:
         recording.status = status
         recording.error_message = error_message
-        db.flush();
+        db.flush()
         db.refresh(recording)
         return recording
 
@@ -54,6 +73,6 @@ class RecordingRepository:
         if duration_sec is not None:
             recording.duration_sec = duration_sec
         recording.status = "completed"
-        db.flush();
+        db.flush()
         db.refresh(recording)
         return recording
