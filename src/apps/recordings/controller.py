@@ -6,6 +6,7 @@ from src.core.middlewares.permissions import require_roles
 from .schemas import RecordingCreate, RecordingOut, RecordingUpdateStatus, RecordingAttachTranscript
 from .services import RecordingService
 from .repository import RecordingRepository
+from .transcription_service import TranscriptionService
 
 router = APIRouter(prefix="/recordings", tags=["recordings"])
 
@@ -137,3 +138,66 @@ def attach_transcript(
         raise HTTPException(status_code=404, detail="Recording not found")
     r = svc.set_transcript(db, r, payload.transcript_text, payload.duration_sec)
     return RecordingOut.model_validate(r)
+
+
+@router.post(
+    "/{recording_id}/transcribe",
+    response_model=RecordingOut,
+    summary="Iniciar transcripción de audio",
+    dependencies=[Depends(require_roles("owner", "admin", "staff"))],
+)
+def start_transcription(
+        recording_id: str,
+        db: Session = Depends(get_db),
+        tenant=Depends(get_current_tenant),
+        _=Depends(get_current_user),
+        svc: RecordingService = Depends(get_service)
+):
+    """Iniciar proceso de transcripción para un audio"""
+    recording = svc.get(db, recording_id)
+    if not recording or str(recording.tenant_id) != str(tenant.id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    # Iniciar transcripción
+    transcription_svc = TranscriptionService()
+    success = transcription_svc.start_transcription_job(recording)
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to start transcription")
+
+    # Actualizar estado
+    recording = svc.update_status(db, recording, "processing")
+    return RecordingOut.model_validate(recording)
+
+
+@router.get(
+    "/{recording_id}/transcription-status",
+    summary="Obtener estado de la transcripción",
+    dependencies=[Depends(require_roles("owner", "admin", "staff", "viewer"))],
+)
+def get_transcription_status(
+        recording_id: str,
+        db: Session = Depends(get_db),
+        tenant=Depends(get_current_tenant),
+        _=Depends(get_current_user),
+        svc: RecordingService = Depends(get_service)
+):
+    """Consultar estado del trabajo de transcripción"""
+    recording = svc.get(db, recording_id)
+    if not recording or str(recording.tenant_id) != str(tenant.id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    transcription_svc = TranscriptionService()
+    job_name = f"transcribe-{recording.id}-{int(recording.created_at.timestamp())}"
+    result = transcription_svc.get_transcription_result(job_name[:200])  # Limitar longitud
+
+    if result and result['job_status'] == 'COMPLETED' and result['text']:
+        # Actualizar recording con el texto transcrito
+        recording = svc.set_transcript(db, recording, result['text'])
+
+    return {
+        "recording_id": recording_id,
+        "transcription_status": result['job_status'] if result else 'UNKNOWN',
+        "transcript_text": result['text'] if result and 'text' in result else None,
+        "error": result.get('error') if result else None
+    }

@@ -21,6 +21,7 @@ from src.apps.users.controller import router as user_router
 from src.apps.auth.controller import router as auth_router
 from src.apps.recordings.controller import router as recording_router
 from src.apps.storage.controller import router as storage_router
+from src.apps.recordings.webhook_controller import router as webhook_router
 
 # -------------------------------------------------------------------
 log = logging.getLogger("app")
@@ -176,6 +177,12 @@ def create_app(config_name: str) -> FastAPI:
         storage_router,
         prefix="/api/v1",
         tags=["Storage"],
+    )
+
+    app.include_router(
+        webhook_router,
+        prefix="/api/v1",
+        tags=["Webhooks"],
     )
 
     return app
