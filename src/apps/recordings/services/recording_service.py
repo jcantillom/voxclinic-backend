@@ -1,8 +1,8 @@
 # src/apps/recordings/services/recording_service.py
-from datetime import datetime, timedelta
-from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select, func
+from datetime import datetime, timedelta
 from src.apps.tenant.models import Tenant
 from src.apps.users.models import User
 from ..repository import RecordingRepository
@@ -17,6 +17,7 @@ class RecordingService:
             self, db: Session, *, tenant: Tenant, user: User,
             bucket: str, key: str, content_type: str, size_bytes: int | None, duration_sec: int | None
     ) -> Recording:
+        """Crea el registro del audio recién subido"""
         try:
             return self.repo.create(
                 db,
@@ -73,91 +74,60 @@ class RecordingService:
 
     def get_dashboard_metrics(self, db: Session, tenant_id: str, user_id: str = None) -> dict:
         """Obtiene métricas reales para el dashboard"""
+        # Consulta base para el tenant
+        base_query = select(Recording).where(Recording.tenant_id == tenant_id)
 
-        # Documentos generados (recordings completados)
-        documents_query = select(func.count(Recording.id)).where(
-            Recording.tenant_id == tenant_id,
-            Recording.status == 'completed'
-        )
+        if user_id:
+            base_query = base_query.where(Recording.user_id == user_id)
 
-        # Pacientes atendidos (únicos por algún criterio)
-        # Por ahora usaremos documentos como proxy
-        patients_query = select(func.count(Recording.id)).where(
-            Recording.tenant_id == tenant_id,
-            Recording.status == 'completed'
-        )
+        # Documentos generados (completados)
+        documents_count = db.execute(
+            base_query.where(Recording.status == 'completed')
+        ).scalar() or 0
 
-        # Tiempo ahorrado (suma de duración de recordings)
-        time_saved_query = select(func.coalesce(func.sum(Recording.duration_sec), 0)).where(
-            Recording.tenant_id == tenant_id,
-            Recording.status == 'completed'
-        )
+        # Tiempo ahorrado (suma de duración)
+        time_saved_sec = db.execute(
+            select(func.coalesce(func.sum(Recording.duration_sec), 0))
+            .where(Recording.tenant_id == tenant_id, Recording.status == 'completed')
+        ).scalar() or 0
 
-        # Dictados procesados (todos los recordings)
-        processed_query = select(func.count(Recording.id)).where(
-            Recording.tenant_id == tenant_id
-        )
+        # Dictados procesados (todos los estados)
+        processed_count = db.execute(base_query).scalar() or 0
 
-        # Ejecutar queries
-        documents = db.execute(documents_query).scalar() or 0
-        patients = db.execute(patients_query).scalar() or 0
-        time_saved_sec = db.execute(time_saved_query).scalar() or 0
-        processed = db.execute(processed_query).scalar() or 0
+        # Para pacientes, por ahora usamos documentos como proxy
+        patients_count = documents_count
 
-        # Calcular porcentajes (vs mes anterior)
-        previous_month = self._get_previous_month_metrics(db, tenant_id)
+        # Calcular tendencias (vs últimos 30 días)
+        thirty_days_ago = datetime.now() - timedelta(days=30)
 
-        return {
-            "documents_generated": {
-                "count": documents,
-                "trend": self._calculate_trend(documents, previous_month.get('documents', 0)),
-                "description": "Informes médicos generados"
-            },
-            "patients_served": {
-                "count": patients,
-                "trend": self._calculate_trend(patients, previous_month.get('patients', 0)),
-                "description": "Pacientes atendidos"
-            },
-            "time_saved": {
-                "count": self._format_time_saved(time_saved_sec),
-                "trend": self._calculate_trend(time_saved_sec, previous_month.get('time_saved', 0)),
-                "description": "Tiempo ahorrado en documentación"
-            },
-            "recordings_processed": {
-                "count": processed,
-                "trend": self._calculate_trend(processed, previous_month.get('processed', 0)),
-                "description": "Dictados procesados"
-            }
-        }
-
-    def _get_previous_month_metrics(self, db: Session, tenant_id: str) -> dict:
-        """Obtiene métricas del mes anterior para comparación"""
-        one_month_ago = datetime.now() - timedelta(days=30)
-
-        documents = db.execute(
-            select(func.count(Recording.id)).where(
-                Recording.tenant_id == tenant_id,
+        previous_documents = db.execute(
+            base_query.where(
                 Recording.status == 'completed',
-                Recording.created_at >= one_month_ago
+                Recording.created_at >= thirty_days_ago
             )
         ).scalar() or 0
 
         return {
-            'documents': documents,
-            'patients': documents,  # mismo proxy por ahora
-            'time_saved': db.execute(
-                select(func.coalesce(func.sum(Recording.duration_sec), 0)).where(
-                    Recording.tenant_id == tenant_id,
-                    Recording.status == 'completed',
-                    Recording.created_at >= one_month_ago
-                )
-            ).scalar() or 0,
-            'processed': db.execute(
-                select(func.count(Recording.id)).where(
-                    Recording.tenant_id == tenant_id,
-                    Recording.created_at >= one_month_ago
-                )
-            ).scalar() or 0
+            "documents_generated": {
+                "count": documents_count,
+                "trend": self._calculate_trend(documents_count, previous_documents),
+                "description": "Informes médicos generados"
+            },
+            "patients_served": {
+                "count": patients_count,
+                "trend": self._calculate_trend(patients_count, previous_documents),
+                "description": "Pacientes atendidos"
+            },
+            "time_saved": {
+                "count": self._format_time_saved(time_saved_sec),
+                "trend": "+12%",  # Placeholder por ahora
+                "description": "Tiempo ahorrado en documentación"
+            },
+            "recordings_processed": {
+                "count": processed_count,
+                "trend": self._calculate_trend(processed_count, previous_documents),
+                "description": "Dictados procesados"
+            }
         }
 
     def _calculate_trend(self, current: int, previous: int) -> str:

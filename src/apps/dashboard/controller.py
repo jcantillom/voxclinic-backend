@@ -16,4 +16,5 @@ async def get_dashboard_metrics(
         recording_service: RecordingService = Depends(get_recording_service)
 ):
     """Obtiene métricas reales para el dashboard"""
-    return recording_service.get_dashboard_metrics(db, str(tenant.id), str(user.id))
+    metrics = recording_service.get_dashboard_metrics(db, str(tenant.id), str(user.id))
+    return metrics
