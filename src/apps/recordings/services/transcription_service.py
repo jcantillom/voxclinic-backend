@@ -13,12 +13,18 @@ logger = logging.getLogger(__name__)
 
 class TranscriptionService:
     def __init__(self):
-        self.transcribe_client = boto3.client(
-            'transcribe',
-            region_name=os.getenv('AWS_REGION'),
-        )
-        self.s3_client = boto3.client('s3', region_name=os.getenv('AWS_REGION'))
+        self.region = os.getenv('AWS_REGION')
         self.bucket_name = os.getenv('S3_BUCKET_AUDIO')
+
+        if not self.region or not self.bucket_name:
+            raise ValueError("AWS_REGION y S3_BUCKET_AUDIO deben estar configurados")
+
+        try:
+            self.transcribe_client = boto3.client('transcribe', region_name=self.region)
+            self.s3_client = boto3.client('s3', region_name=self.region)
+        except Exception as e:
+            logger.error(f"Error inicializando clientes AWS: {e}")
+            raise
 
     def start_transcription_job(
             self,
@@ -27,8 +33,21 @@ class TranscriptionService:
     ) -> bool:
         """Inicia un trabajo de transcripción en AWS Transcribe"""
         try:
+            # Generar nombre único para el job
             job_name = f"transcribe-{recording.id}-{int(recording.created_at.timestamp())}"
-            job_name = job_name[:200]  # Limitar longitud
+            job_name = job_name.replace('-', '')[:200]  # Limitar longitud y quitar guiones
+
+            # Verificar que no exista un job con el mismo nombre
+            try:
+                existing_job = self.transcribe_client.get_transcription_job(
+                    TranscriptionJobName=job_name
+                )
+                if existing_job['TranscriptionJob']['TranscriptionJobStatus'] in ['IN_PROGRESS', 'QUEUED']:
+                    logger.info(f"Transcription job already exists: {job_name}")
+                    return True
+            except ClientError:
+                # Job no existe, continuar
+                pass
 
             media_uri = f"s3://{recording.bucket}/{recording.key}"
 
@@ -57,7 +76,7 @@ class TranscriptionService:
         """Obtiene el estado y resultado de la transcripción"""
         try:
             job_name = f"transcribe-{recording.id}-{int(recording.created_at.timestamp())}"
-            job_name = job_name[:200]
+            job_name = job_name.replace('-', '')[:200]
 
             # Obtener estado del job desde Transcribe
             response = self.transcribe_client.get_transcription_job(
