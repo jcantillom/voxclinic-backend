@@ -74,64 +74,95 @@ class RecordingService:
 
     def get_dashboard_metrics(self, db: Session, tenant_id: str, user_id: str = None) -> dict:
         """Obtiene métricas reales para el dashboard"""
-        # Consulta base para el tenant
-        base_query = select(Recording).where(Recording.tenant_id == tenant_id)
 
+        # CONSULTAS DE CONTEO - DEBEN USAR select(func.count(Recording.id))
+
+        base_query_completed = select(func.count(Recording.id)).where(
+            Recording.tenant_id == tenant_id,
+            Recording.status == 'completed'
+        )
+        base_query_total = select(func.count(Recording.id)).where(Recording.tenant_id == tenant_id)
+
+        # Filtro por usuario (si aplica)
         if user_id:
-            base_query = base_query.where(Recording.user_id == user_id)
+            base_query_completed = base_query_completed.where(Recording.user_id == user_id)
+            base_query_total = base_query_total.where(Recording.user_id == user_id)
 
-        # Documentos generados (completados)
-        documents_count = db.execute(
-            base_query.where(Recording.status == 'completed')
-        ).scalar() or 0
+        # Métrica: Documentos generados (completados) - Hoy
+        today = datetime.now().date()
+        # CORRECCIÓN 1: Asegurar que se ejecuta la función de conteo.
+        today_documents = db.execute(
+            base_query_completed.where(func.date(Recording.created_at) == today)
+        ).scalar_one_or_none() or 0
 
-        # Tiempo ahorrado (suma de duración)
+        # Métrica: Dictados procesados (todos los estados) - Total
+        # CORRECCIÓN 2: Asegurar que se ejecuta la función de conteo.
+        processed_total = db.execute(base_query_total).scalar_one_or_none() or 0
+
+        # Tiempo ahorrado (suma de duración) - Total
         time_saved_sec = db.execute(
             select(func.coalesce(func.sum(Recording.duration_sec), 0))
             .where(Recording.tenant_id == tenant_id, Recording.status == 'completed')
-        ).scalar() or 0
-
-        # Dictados procesados (todos los estados)
-        processed_count = db.execute(base_query).scalar() or 0
-
-        # Para pacientes, por ahora usamos documentos como proxy
-        patients_count = documents_count
+        ).scalar_one_or_none() or 0  # Uso de coalesce para asegurar 0
 
         # Calcular tendencias (vs últimos 30 días)
         thirty_days_ago = datetime.now() - timedelta(days=30)
 
-        previous_documents = db.execute(
-            base_query.where(
+        # Documentos completados en los últimos 30 días (CURRENT)
+        # CORRECCIÓN 3: Asegurar que se ejecuta la función de conteo.
+        last_30_days_completed = db.execute(
+            select(func.count(Recording.id))
+            .where(
+                Recording.tenant_id == tenant_id,
                 Recording.status == 'completed',
                 Recording.created_at >= thirty_days_ago
             )
-        ).scalar() or 0
+        ).scalar_one_or_none() or 0
+
+        # Documentos completados en los 30 días anteriores a ese período (PREVIOUS)
+        sixty_days_ago = datetime.now() - timedelta(days=60)
+        # CORRECCIÓN 4: Asegurar que se ejecuta la función de conteo.
+        previous_30_days_completed = db.execute(
+            select(func.count(Recording.id))
+            .where(
+                Recording.tenant_id == tenant_id,
+                Recording.status == 'completed',
+                Recording.created_at >= sixty_days_ago,
+                Recording.created_at < thirty_days_ago
+            )
+        ).scalar_one_or_none() or 0
+
+        # Para pacientes, por ahora usamos documentos generados hoy como proxy
+        patients_count = today_documents
 
         return {
             "documents_generated": {
-                "count": documents_count,
-                "trend": self._calculate_trend(documents_count, previous_documents),
-                "description": "Informes médicos generados"
+                "count": today_documents,
+                "trend": self._calculate_trend(last_30_days_completed, previous_30_days_completed),
+                "description": "Informes generados hoy"
             },
             "patients_served": {
                 "count": patients_count,
-                "trend": self._calculate_trend(patients_count, previous_documents),
-                "description": "Pacientes atendidos"
+                "trend": self._calculate_trend(last_30_days_completed, previous_30_days_completed),
+                "description": "Pacientes registrados hoy"
             },
             "time_saved": {
                 "count": self._format_time_saved(time_saved_sec),
-                "trend": "+12%",  # Placeholder por ahora
-                "description": "Tiempo ahorrado en documentación"
+                "trend": "+0%",
+                "description": "Tiempo total ahorrado"
             },
             "recordings_processed": {
-                "count": processed_count,
-                "trend": self._calculate_trend(processed_count, previous_documents),
-                "description": "Dictados procesados"
+                "count": processed_total,
+                "trend": self._calculate_trend(processed_total, previous_30_days_completed),
+                "description": "Dictados en sistema"
             }
         }
 
     def _calculate_trend(self, current: int, previous: int) -> str:
-        """Calcula tendencia porcentual"""
+        """Calcula tendencia porcentual, devolviendo '0%' o N/A de forma segura."""
+        if current is None or previous is None:
+            return "N/A"
+
         if previous == 0:
             return "+100%" if current > 0 else "0%"
 
@@ -139,7 +170,9 @@ class RecordingService:
         trend = "+" if change > 0 else ""
         return f"{trend}{change:.0f}%"
 
-    def _format_time_saved(self, seconds: int) -> str:
-        """Formatea tiempo ahorrado en horas"""
+    def _format_time_saved(self, seconds: int | float) -> str:
+        """Formatea tiempo ahorrado en horas, devolviendo '0h' si es nulo o cero."""
+        if seconds is None or seconds == 0:
+            return "0h"
         hours = seconds / 3600
         return f"{hours:.0f}h"
