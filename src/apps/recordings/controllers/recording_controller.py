@@ -1,12 +1,13 @@
+# src/apps/recordings/controllers/recording_controller.py
 from typing import List
 from fastapi import APIRouter, Depends, Query, Response, status, HTTPException
 from sqlalchemy.orm import Session
 from src.core.connections.deps import get_db, get_current_tenant, get_current_user
 from src.core.middlewares.permissions import require_roles
-from .schemas import RecordingCreate, RecordingOut, RecordingUpdateStatus, RecordingAttachTranscript
-from .services import RecordingService
-from .repository import RecordingRepository
-from .transcription_service import TranscriptionService
+from ..schemas import RecordingCreate, RecordingOut, RecordingUpdateStatus, RecordingAttachTranscript
+from ..dependencies import get_recording_service, get_transcription_service
+from ..services.recording_service import RecordingService
+from ..services.transcription_service import TranscriptionService
 
 router = APIRouter(prefix="/recordings", tags=["recordings"])
 
@@ -18,10 +19,6 @@ ALLOWED_CT = {
     "audio/webm",
     "audio/ogg",
 }
-
-
-def get_service() -> RecordingService:
-    return RecordingService(RecordingRepository())
 
 
 @router.post(
@@ -36,6 +33,7 @@ def register_recording(
         db: Session = Depends(get_db),
         tenant=Depends(get_current_tenant),
         me=Depends(get_current_user),
+        recording_service: RecordingService = Depends(get_recording_service),
 ):
     if payload.content_type not in ALLOWED_CT:
         raise HTTPException(
@@ -43,8 +41,7 @@ def register_recording(
             detail=f"content_type '{payload.content_type}' no es soportado. "
                    f"Los tipos permitidos son: {', '.join(ALLOWED_CT)}"
         )
-    svc = get_service()
-    r = svc.register_upload(
+    r = recording_service.register_upload(
         db,
         tenant=tenant,
         user=me,
@@ -72,9 +69,9 @@ def list_recordings(
         status_q: str | None = Query(None, pattern="^(uploaded|processing|completed|failed)$"),
         page: int = Query(1, ge=1),
         page_size: int = Query(50, ge=1, le=200),
+        recording_service: RecordingService = Depends(get_recording_service),
 ):
-    svc = get_service()
-    rows, total = svc.list(db, tenant=tenant, q=q, status=status_q, page=page, page_size=page_size)
+    rows, total = recording_service.list(db, tenant=tenant, q=q, status=status_q, page=page, page_size=page_size)
     response.headers["X-Total-Count"] = str(total)
     return [RecordingOut.model_validate(x) for x in rows]
 
@@ -90,9 +87,9 @@ def get_recording(
         db: Session = Depends(get_db),
         tenant=Depends(get_current_tenant),
         _=Depends(get_current_user),
-        svc: RecordingService = Depends(get_service)
+        recording_service: RecordingService = Depends(get_recording_service),
 ):
-    r = svc.get(db, recording_id)
+    r = recording_service.get(db, recording_id)
     if not r or str(r.tenant_id) != str(tenant.id):
         raise HTTPException(status_code=404, detail="Recording not found")
     return RecordingOut.model_validate(r)
@@ -110,12 +107,12 @@ def update_recording_status(
         db: Session = Depends(get_db),
         tenant=Depends(get_current_tenant),
         _=Depends(get_current_user),
-        svc: RecordingService = Depends(get_service)
+        recording_service: RecordingService = Depends(get_recording_service),
 ):
-    r = svc.get(db, recording_id)
+    r = recording_service.get(db, recording_id)
     if not r or str(r.tenant_id) != str(tenant.id):
         raise HTTPException(status_code=404, detail="Recording not found")
-    r = svc.update_status(db, r, payload.status, payload.error_message)
+    r = recording_service.update_status(db, r, payload.status, payload.error_message)
     return RecordingOut.model_validate(r)
 
 
@@ -131,12 +128,12 @@ def attach_transcript(
         db: Session = Depends(get_db),
         tenant=Depends(get_current_tenant),
         _=Depends(get_current_user),
-        svc: RecordingService = Depends(get_service)
+        recording_service: RecordingService = Depends(get_recording_service),
 ):
-    r = svc.get(db, recording_id)
+    r = recording_service.get(db, recording_id)
     if not r or str(r.tenant_id) != str(tenant.id):
         raise HTTPException(status_code=404, detail="Recording not found")
-    r = svc.set_transcript(db, r, payload.transcript_text, payload.duration_sec)
+    r = recording_service.set_transcript(db, r, payload.transcript_text, payload.duration_sec)
     return RecordingOut.model_validate(r)
 
 
@@ -151,22 +148,22 @@ def start_transcription(
         db: Session = Depends(get_db),
         tenant=Depends(get_current_tenant),
         _=Depends(get_current_user),
-        svc: RecordingService = Depends(get_service)
+        recording_service: RecordingService = Depends(get_recording_service),
+        transcription_service: TranscriptionService = Depends(get_transcription_service),
 ):
     """Iniciar proceso de transcripción para un audio"""
-    recording = svc.get(db, recording_id)
+    recording = recording_service.get(db, recording_id)
     if not recording or str(recording.tenant_id) != str(tenant.id):
         raise HTTPException(status_code=404, detail="Recording not found")
 
     # Iniciar transcripción
-    transcription_svc = TranscriptionService()
-    success = transcription_svc.start_transcription_job(recording)
+    success = transcription_service.start_transcription_job(recording)
 
     if not success:
         raise HTTPException(status_code=500, detail="Failed to start transcription")
 
     # Actualizar estado
-    recording = svc.update_status(db, recording, "processing")
+    recording = recording_service.update_status(db, recording, "processing")
     return RecordingOut.model_validate(recording)
 
 
@@ -180,24 +177,24 @@ def get_transcription_status(
         db: Session = Depends(get_db),
         tenant=Depends(get_current_tenant),
         _=Depends(get_current_user),
-        svc: RecordingService = Depends(get_service)
+        recording_service: RecordingService = Depends(get_recording_service),
+        transcription_service: TranscriptionService = Depends(get_transcription_service),
 ):
     """Consultar estado del trabajo de transcripción"""
-    recording = svc.get(db, recording_id)
+    recording = recording_service.get(db, recording_id)
     if not recording or str(recording.tenant_id) != str(tenant.id):
         raise HTTPException(status_code=404, detail="Recording not found")
 
-    transcription_svc = TranscriptionService()
-    job_name = f"transcribe-{recording.id}-{int(recording.created_at.timestamp())}"
-    result = transcription_svc.get_transcription_result(job_name[:200])  # Limitar longitud
+    # Obtener estado de la transcripción
+    result = transcription_service.get_transcription_status(recording)
 
-    if result and result['job_status'] == 'COMPLETED' and result['text']:
-        # Actualizar recording con el texto transcrito
-        recording = svc.set_transcript(db, recording, result['text'])
+    # Si la transcripción está completada, actualizar el recording
+    if result["transcription_status"] == "COMPLETED" and result["transcript_text"]:
+        recording = recording_service.set_transcript(db, recording, result["transcript_text"])
 
     return {
         "recording_id": recording_id,
-        "transcription_status": result['job_status'] if result else 'UNKNOWN',
-        "transcript_text": result['text'] if result and 'text' in result else None,
-        "error": result.get('error') if result else None
+        "transcription_status": result["transcription_status"],
+        "transcript_text": result["transcript_text"],
+        "error": result["error"]
     }

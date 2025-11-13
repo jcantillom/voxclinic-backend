@@ -1,10 +1,10 @@
+# src/apps/recordings/services/recording_service.py
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from src.apps.tenant.models import Tenant
 from src.apps.users.models import User
-from .repository import RecordingRepository
-from .models import RECORDING_STATUS, Recording
-
+from ..repository import RecordingRepository
+from ..models import Recording
 
 class RecordingService:
     def __init__(self, repo: RecordingRepository):
@@ -14,10 +14,6 @@ class RecordingService:
             self, db: Session, *, tenant: Tenant, user: User,
             bucket: str, key: str, content_type: str, size_bytes: int | None, duration_sec: int | None
     ) -> Recording:
-        """
-        Crea el registro del audio recién subido.
-        Si (tenant_id, bucket, key) ya existe, devuelve el existente (idempotente).
-        """
         try:
             return self.repo.create(
                 db,
@@ -31,7 +27,6 @@ class RecordingService:
                 status="uploaded",
             )
         except IntegrityError:
-            # Limpia la sesión y retorna el existente (evita UniqueViolation)
             db.rollback()
             existing = self.repo.get_by_unique(
                 db,
@@ -40,9 +35,7 @@ class RecordingService:
                 key=key,
             )
             if existing:
-                # Si quisieras refrescar metadatos (p. ej., size/content_type), este es el lugar.
                 return existing
-            # En el caso improbable de no encontrarlo por carrera, relanzamos.
             raise
 
     def list(
