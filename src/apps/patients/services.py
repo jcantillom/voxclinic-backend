@@ -30,7 +30,13 @@ class PatientService:
         )
 
     def search_patients(
-            self, db: Session, *, tenant: Tenant, q: Optional[str] = None, page: int = 1, page_size: int = 50
+            self,
+            db: Session,
+            *,
+            tenant: Tenant,
+            q: Optional[str] = None,
+            page: int = 1,
+            page_size: int = 50
     ) -> Tuple[Sequence[Patient], int]:
         return self.repo.list_by_tenant(db, tenant.id, q=q, page=page, page_size=page_size)
 

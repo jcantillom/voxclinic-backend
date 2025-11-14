@@ -1,4 +1,4 @@
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Tuple
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from .models import Document
@@ -7,11 +7,11 @@ from .models import Document
 class DocumentRepository:
     @staticmethod
     def create(db: Session, **data) -> Document:
-        d = Document(**data)
-        db.add(d)
+        p = Document(**data)
+        db.add(p)
         db.flush()
-        db.refresh(d)
-        return d
+        db.refresh(p)
+        return p
 
     @staticmethod
     def get_by_id(db: Session, document_id: str) -> Optional[Document]:
@@ -20,31 +20,35 @@ class DocumentRepository:
     @staticmethod
     def list_by_tenant(
             db: Session, tenant_id, *, q: Optional[str] = None, document_type: Optional[str] = None,
-            page: int = 1, page_size: int = 50
-    ) -> Sequence[Document]:
-        """Lista documentos por tenant con filtros básicos."""
+            page: int = 1, page_size: int = 5
+    ) -> Tuple[Sequence[Document], int]:
+        """Lista documentos por tenant con filtros básicos y paginación."""
+
+        # 1. Crear la base de la sentencia de selección
         stmt = select(Document).where(Document.tenant_id == tenant_id)
 
+        # 2. Aplicar filtros (si existen)
         if document_type:
             stmt = stmt.where(Document.document_type == document_type)
+
         if q:
-            # Buscar en título o contenido
+            # Búsqueda por título o contenido (ilike es sensible a Postgres)
+            # Aseguramos que la búsqueda por 'q' siempre use minúsculas
+            search_term = f"%{q.lower()}%"
             stmt = stmt.where(
-                (Document.title.ilike(f"%{q}%")) | (Document.content.ilike(f"%{q}%"))
+                (Document.title.ilike(search_term)) | (Document.content.ilike(search_term))
             )
 
+        # 3. Obtener el total (COUNT)
+        # Usamos func.count(Document.id) para contar correctamente
+        count_stmt = select(func.count(Document.id)).select_from(
+            stmt.alias())  # Usar .alias() en lugar de .subquery() para consistencia
+        total = db.execute(count_stmt).scalar_one()
+
+        # 4. Aplicar ordenamiento y paginación
         offset = (page - 1) * page_size
         rows = db.execute(
             stmt.order_by(Document.created_at.desc()).offset(offset).limit(page_size)
         ).scalars().all()
-        return rows
 
-    @staticmethod
-    def update_content(db: Session, doc: Document, content: str, is_finalized: bool,
-                       is_synced: bool = False) -> Document:
-        doc.content = content
-        doc.is_finalized = is_finalized
-        doc.is_synced = is_synced
-        db.flush()
-        db.refresh(doc)
-        return doc
+        return rows, total

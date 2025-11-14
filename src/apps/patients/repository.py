@@ -28,17 +28,19 @@ class PatientRepository:
 
     @staticmethod
     def list_by_tenant(
-            db: Session, tenant_id, *, q: Optional[str] = None, page: int = 1, page_size: int = 50
+            db: Session, tenant_id, *, q: Optional[str] = None, page: int = 1, page_size: int = 5
     ) -> Tuple[Sequence[Patient], int]:
         stmt = select(Patient).where(Patient.tenant_id == tenant_id)
 
         if q:
             # Búsqueda por nombre o identificador
+            search_term = f"%{q.lower()}%"
             stmt = stmt.where(
-                (Patient.full_name.ilike(f"%{q}%")) | (Patient.identifier.ilike(f"%{q}%"))
+                (Patient.full_name.ilike(search_term)) | (Patient.identifier.ilike(search_term))
             )
 
-        count_stmt = select(func.count()).select_from(stmt.subquery())
+        # Obtener el total
+        count_stmt = select(func.count(Patient.id)).select_from(stmt.alias())
         total = db.execute(count_stmt).scalar_one()
 
         offset = (page - 1) * page_size

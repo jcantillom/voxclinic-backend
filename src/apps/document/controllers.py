@@ -81,16 +81,16 @@ def get_document(
     dependencies=[Depends(require_roles("owner", "admin", "staff", "viewer"))],
 )
 def list_documents(
+        response: Response,  # Necesitamos el objeto Response para modificar los headers
         db: Session = Depends(get_db),
         tenant=Depends(get_current_tenant),
         q: str | None = Query(None, description="Buscar en título o contenido"),
         document_type: str | None = Query(None, description="Filtrar por tipo de documento"),
         page: int = Query(1, ge=1),
-        page_size: int = Query(50, ge=1, le=200),
+        page_size: int = Query(5, ge=1, le=50),  # Establecemos 5 por defecto
         doc_service: DocumentService = Depends(get_document_service),
 ):
-    # NOTA: No calculamos total aquí para simplificar, pero el repositorio lo permite si se necesita la paginación completa.
-    rows = doc_service.list_documents(
+    rows, total = doc_service.list_documents(
         db,
         str(tenant.id),
         q=q,
@@ -98,6 +98,9 @@ def list_documents(
         page=page,
         page_size=page_size
     )
+    # CORRECCIÓN CLAVE: Agregar el header para que el frontend pueda calcular las páginas
+    response.headers["X-Total-Count"] = str(total)
+
     return [DocumentOut.model_validate(x) for x in rows]
 
 

@@ -50,13 +50,17 @@ def list_patients(
         db: Session = Depends(get_db),
         tenant=Depends(get_current_tenant),
         _=Depends(get_current_user),
-        q: str | None = Query(None, description="Buscar por nombre o ID de historia"),
+        q: str | None = Query(None, description="Buscar por email/full_name"),
         page: int = Query(1, ge=1),
-        page_size: int = Query(50, ge=1, le=200),
+        page_size: int = Query(5, ge=1, le=50),  # Establecemos 5 por defecto
         svc: PatientService = Depends(get_service),
 ):
-    rows, total = svc.search_patients(db, tenant=tenant, q=q, page=page, page_size=page_size)
+    rows, total = svc.search_patients(
+        db, tenant=tenant, q=q, page=page, page_size=page_size
+    )
+    # CORRECCIÓN CLAVE: Agregar el header para que el frontend pueda calcular las páginas
     response.headers["X-Total-Count"] = str(total)
+
     return [PatientOut.model_validate(x) for x in rows]
 
 

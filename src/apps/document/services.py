@@ -8,7 +8,7 @@ from src.core.errors.errors import EntityNotFoundError, ConflictError
 from .repository import DocumentRepository
 from .models import Document
 from datetime import datetime
-# Importamos la tarea de fondo de FastAPI, ya que la integración es asíncrona
+from typing import Optional, Sequence, Tuple
 from fastapi import BackgroundTasks
 
 logger = logging.getLogger(__name__)
@@ -72,8 +72,8 @@ class DocumentService:
 
         return doc
 
-    def list_documents(self, db: Session, tenant_id: str, **kwargs):
-        """Lista documentos con filtros y paginación."""
+    def list_documents(self, db: Session, tenant_id: str, **kwargs) -> Tuple[Sequence[Document], int]:
+        """Lista documentos con filtros y paginación y devuelve (rows, total)."""
         return self.repo.list_by_tenant(db, tenant_id, **kwargs)
 
     def update_document_content(
@@ -126,12 +126,12 @@ class DocumentService:
         clinical_subject = meta.get('clinical_subject', 'Sin foco')
 
         header = f"""
-        {tenant_name} | 
-        DOCUMENTO MÉDICO: {doc_type.upper().replace('_', ' ')}
-        PACIENTE ID: {patient_info}
-        MÉDICO: {doctor_name}
-        ASUNTO: {clinical_subject}
-        FECHA: {datetime.now().strftime('%Y-%m-%d %H:%M')}
+{tenant_name} | 
+DOCUMENTO MÉDICO: {doc_type.upper().replace('_', ' ')}
+PACIENTE ID: {patient_info}
+MÉDICO: {doctor_name}
+ASUNTO: {clinical_subject}
+FECHA: {datetime.now().strftime('%Y-%m-%d %H:%M')}
         """
         footer = f"\n\n--- FIN DEL INFORME ---\n[ESTADO: FINALIZADO Y PENDIENTE DE SINCRONIZACIÓN HIS]\n"
 

@@ -1,27 +1,27 @@
 # src/apps/recordings/services/recording_service.py
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import select, func
-from datetime import datetime, timedelta
+from sqlalchemy import select, func, cast, Date  # Importamos Date para comparación
+from datetime import datetime, timedelta, date
 from src.apps.tenant.models import Tenant
 from src.apps.users.models import User
 from ..repository import RecordingRepository
 from ..models import Recording
-from sqlalchemy import cast, Integer
+from typing import Sequence, Tuple
 
 
 class RecordingService:
     def __init__(self, repo: RecordingRepository):
         self.repo = repo
 
-    # CORRECCIÓN: El método debe existir aquí
+    # [Mantener métodos register_upload, list, get, update_status, set_transcript intactos]
     def register_upload(
             self, db: Session, *, tenant: Tenant, user: User,
             bucket: str, key: str, content_type: str, size_bytes: int | None, duration_sec: int | None
     ) -> Recording:
         """Crea el registro del audio recién subido"""
         try:
-            return self.repo.create(  # Llama al repo
+            return self.repo.create(
                 db,
                 tenant_id=tenant.id,
                 user_id=user.id if user else None,
@@ -77,8 +77,6 @@ class RecordingService:
     def get_dashboard_metrics(self, db: Session, tenant_id: str, user_id: str = None) -> dict:
         """Obtiene métricas reales para el dashboard"""
 
-        # CONSULTAS DE CONTEO
-
         base_query_completed_count = select(func.count(Recording.id)).where(
             Recording.tenant_id == tenant_id,
             Recording.status == 'completed'
@@ -92,14 +90,16 @@ class RecordingService:
 
         # Métrica: Documentos generados (completados) - Hoy
         today = datetime.now().date()
+
+        # CORRECCIÓN 1: Usamos la función de CAST para comparar solo la fecha de la columna TIMESTAMP
         today_documents = db.execute(
-            base_query_completed_count.where(func.date(Recording.created_at) == today)
+            base_query_completed_count.where(cast(Recording.created_at, Date) == today)
         ).scalar_one_or_none() or 0
 
         # Métrica: Dictados procesados (todos los estados) - Total
         processed_total = db.execute(base_query_total_count).scalar_one_or_none() or 0
 
-        # Métrica: Dictados pendientes de revisión (Ej: status = 'uploaded' o 'processing')
+        # Métrica: Dictados pendientes de revisión (status = 'uploaded' o 'processing')
         pending_count = db.execute(
             base_query_total_count.where(Recording.status.in_(['uploaded', 'processing']))
         ).scalar_one_or_none() or 0
@@ -112,30 +112,30 @@ class RecordingService:
 
         # Calcular tendencias (vs últimos 30 días)
         thirty_days_ago = datetime.now() - timedelta(days=30)
+        sixty_days_ago = datetime.now() - timedelta(days=60)
 
-        # Documentos completados en los últimos 30 días (CURRENT)
+        # Documentos completados en los últimos 30 días (CURRENT period)
         last_30_days_completed = db.execute(
             select(func.count(Recording.id))
             .where(
                 Recording.tenant_id == tenant_id,
                 Recording.status == 'completed',
-                Recording.created_at >= thirty_days_ago
+                Recording.created_at >= thirty_days_ago  # >= 30 días atrás
             )
         ).scalar_one_or_none() or 0
 
-        # Documentos completados en los 30 días anteriores a ese período (PREVIOUS)
-        sixty_days_ago = datetime.now() - timedelta(days=60)
+        # Documentos completados en los 30 días anteriores (PREVIOUS period)
         previous_30_days_completed = db.execute(
             select(func.count(Recording.id))
             .where(
                 Recording.tenant_id == tenant_id,
                 Recording.status == 'completed',
-                Recording.created_at >= sixty_days_ago,
-                Recording.created_at < thirty_days_ago
+                Recording.created_at >= sixty_days_ago,  # >= 60 días atrás
+                Recording.created_at < thirty_days_ago  # < 30 días atrás
             )
         ).scalar_one_or_none() or 0
 
-        # Para pacientes, por ahora usamos documentos generados hoy como proxy
+        # Pacientes (proxy)
         patients_count = today_documents
 
         return {
@@ -163,7 +163,7 @@ class RecordingService:
 
     def _calculate_trend(self, current: int, previous: int) -> str:
         """Calcula tendencia porcentual, devolviendo '0%' o N/A de forma segura."""
-        if current is None or previous is None:
+        if current is None or previous is None or current < 0 or previous < 0:
             return "N/A"
 
         if previous == 0:
