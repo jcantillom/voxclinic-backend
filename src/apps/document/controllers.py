@@ -55,6 +55,25 @@ def generate_document(
     return DocumentOut.model_validate(doc)
 
 
+# NUEVO ENDPOINT: Obtener documento por ID
+@router.get(
+    "/{document_id}",
+    response_model=DocumentOut,
+    summary="Obtener documento clínico por ID",
+    dependencies=[Depends(require_roles("owner", "admin", "staff", "viewer"))],
+)
+def get_document(
+        document_id: UUID,
+        db: Session = Depends(get_db),
+        tenant=Depends(get_current_tenant),
+        doc_service: DocumentService = Depends(get_document_service),
+):
+    doc = doc_service.get_by_id(db, str(document_id))
+    if not doc or str(doc.tenant_id) != str(tenant.id):
+        raise EntityNotFoundError("Document", "id", document_id)
+    return DocumentOut.model_validate(doc)
+
+
 @router.get(
     "",
     response_model=List[DocumentOut],

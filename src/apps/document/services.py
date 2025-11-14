@@ -142,3 +142,9 @@ class DocumentService:
             return f"{header}\nHISTORIA CLÍNICA\n\nMOTIVO DE CONSULTA:\n{clinical_subject}\n\nANAMNESIS DETALLADA:\n{transcript}\n\nPLAN:\n[Generado por IA - Revisar]{footer}"
 
         return f"{header}\nTRANSCRIPCIÓN:\n{transcript}{footer}"
+
+    def get_by_id(self, db: Session, document_id: str) -> Document:
+        doc = self.repo.get_by_id(db, document_id)
+        if not doc:
+            raise EntityNotFoundError("Document", "id", document_id)
+        return doc
