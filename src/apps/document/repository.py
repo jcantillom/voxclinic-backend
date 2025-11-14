@@ -18,6 +18,17 @@ class DocumentRepository:
         return db.get(Document, document_id)
 
     @staticmethod
+    def update_content(
+            db: Session, doc: Document, content: str, is_finalized: bool, is_synced: bool
+    ) -> Document:
+        doc.content = content
+        doc.is_finalized = is_finalized
+        doc.is_synced = is_synced  # Aseguramos que se pueda resetear si se edita
+        db.flush()
+        db.refresh(doc)
+        return doc
+
+    @staticmethod
     def list_by_tenant(
             db: Session, tenant_id, *, q: Optional[str] = None, document_type: Optional[str] = None,
             page: int = 1, page_size: int = 5
