@@ -7,7 +7,9 @@ from src.apps.recordings.models import Recording
 from src.core.errors.errors import EntityNotFoundError, ConflictError
 from .repository import DocumentRepository
 from .models import Document
-from datetime import datetime  # Asegurar importación de datetime
+from datetime import datetime
+# Importamos la tarea de fondo de FastAPI, ya que la integración es asíncrona
+from fastapi import BackgroundTasks
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +17,8 @@ logger = logging.getLogger(__name__)
 class DocumentService:
     def __init__(self, repo: DocumentRepository):
         self.repo = repo
+        # SUPOSICIÓN: Se instancia el servicio de integración
+        # self.integration_service = IntegrationService()
 
     def generate_and_save_document(
             self,
@@ -33,7 +37,7 @@ class DocumentService:
         if str(recording.tenant_id) != str(tenant.id):
             raise ConflictError("Recording does not belong to the current tenant.")
 
-        # CORRECCIÓN: Verificar si ya existe un Documento asociado a este Recording ID
+        # Verificar si ya existe un Documento asociado a este Recording ID
         existing_doc = db.execute(
             select(Document).where(Document.recording_id == recording.id)
         ).scalar_one_or_none()
@@ -44,7 +48,6 @@ class DocumentService:
         # --- Lógica de Generación Estructurada (Simulada) ---
         title = f"{document_type.replace('_', ' ').title()} generado"
 
-        # Simulación: Estructura el texto con membrete (esto sería lógica compleja de Jinja/NLP)
         structured_content = self._structure_document(
             document_type,
             tenant.name,
@@ -58,15 +61,20 @@ class DocumentService:
             db,
             tenant_id=tenant.id,
             user_id=user.id,
-            recording_id=recording.id,  # Usamos recording.id (UUID)
+            recording_id=recording.id,
             document_type=document_type,
             title=title,
             content=structured_content,
             clinical_meta=clinical_meta,
-            is_finalized=False  # Listo para revisión
+            is_finalized=False,
+            is_synced=False  # Por defecto no sincronizado
         )
 
         return doc
+
+    def list_documents(self, db: Session, tenant_id: str, **kwargs):
+        """Lista documentos con filtros y paginación."""
+        return self.repo.list_by_tenant(db, tenant_id, **kwargs)
 
     def update_document_content(
             self,
@@ -74,26 +82,63 @@ class DocumentService:
             document_id: str,
             tenant_id: str,
             content: str,
-            is_finalized: bool
+            is_finalized: bool,
+            is_synced: bool
     ) -> Document:
         doc = self.repo.get_by_id(db, document_id)
         if not doc or str(doc.tenant_id) != tenant_id:
             raise EntityNotFoundError("Document", "id", document_id)
 
-        return self.repo.update_content(db, doc, content, is_finalized)
+        return self.repo.update_content(db, doc, content, is_finalized, is_synced)
+
+    def export_to_his(self, db: Session, document_id: str, tenant: Tenant,
+                      background_tasks: BackgroundTasks) -> Document:
+        """
+        Marca el documento como finalizado (si no lo estaba) y dispara la tarea de integración.
+        """
+        doc = self.repo.get_by_id(db, document_id)
+        if not doc or str(doc.tenant_id) != str(tenant.id):
+            raise EntityNotFoundError("Document", "id", document_id)
+
+        if doc.is_synced:
+            raise ConflictError("Document already synced with HIS.")
+
+        # 1. Marcar como finalizado (si no lo está) y pendiente de sincronización
+        doc = self.repo.update_content(db, doc, doc.content, True, False)
+
+        # 2. Disparar la integración asíncrona
+        # background_tasks.add_task(
+        #     self.integration_service.send_document,
+        #     tenant_code=tenant.code,
+        #     document=doc,
+        # )
+
+        # SUPOSICIÓN MVP: Marcamos inmediatamente como sincronizado en el entorno de demo
+        doc = self.repo.update_content(db, doc, doc.content, True, True)
+
+        return doc
 
     def _structure_document(
             self, doc_type: str, tenant_name: str, doctor_name: str, transcript: str, meta: dict
     ) -> str:
         """Simula la generación de contenido estructurado (MVP)."""
-        header = f"--- {tenant_name} ---\nDOCUMENTO MÉDICO: {doc_type.upper().replace('_', ' ')}\nMÉDICO: {doctor_name}\nFECHA: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n---"
-        footer = f"\n\n--- FIN DEL INFORME ---\n[ESTADO: PENDIENTE DE FIRMA]\n"
+        patient_info = meta.get('patient_id', 'N/A')
+        clinical_subject = meta.get('clinical_subject', 'Sin foco')
 
-        # La lógica real aquí usaría un modelo de lenguaje para clasificar el texto.
+        header = f"""
+        {tenant_name} | 
+        DOCUMENTO MÉDICO: {doc_type.upper().replace('_', ' ')}
+        PACIENTE ID: {patient_info}
+        MÉDICO: {doctor_name}
+        ASUNTO: {clinical_subject}
+        FECHA: {datetime.now().strftime('%Y-%m-%d %H:%M')}
+        """
+        footer = f"\n\n--- FIN DEL INFORME ---\n[ESTADO: FINALIZADO Y PENDIENTE DE SINCRONIZACIÓN HIS]\n"
+
         if doc_type == "radiology_report":
-            return f"{header}\n\nINFORME RADIOLÓGICO\n\nHALLAZGOS:\n{transcript}\n\nIMPRESIÓN DIAGNÓSTICA:\n[Generada por IA - Revisar]\n{footer}"
+            return f"{header}\nINFORME RADIOLÓGICO\n\nHALLAZGOS:\n{transcript}\n\nIMPRESIÓN DIAGNÓSTICA:\n[Generada por IA - Revisar]\n{footer}"
 
         if doc_type == "clinical_history":
-            return f"{header}\n\nHISTORIA CLÍNICA\n\nMOTIVO DE CONSULTA:\n{transcript[:100]}...\n\nANAMNESIS:\n{transcript}\n\nPLAN:\n[Generado por IA - Revisar]{footer}"
+            return f"{header}\nHISTORIA CLÍNICA\n\nMOTIVO DE CONSULTA:\n{clinical_subject}\n\nANAMNESIS DETALLADA:\n{transcript}\n\nPLAN:\n[Generado por IA - Revisar]{footer}"
 
-        return f"{header}\n\nTRANSCRIPCIÓN COMPLETA:\n{transcript}{footer}"
+        return f"{header}\nTRANSCRIPCIÓN:\n{transcript}{footer}"

@@ -7,7 +7,7 @@ from src.core.middlewares.permissions import require_roles
 from ..schemas import RecordingCreate, RecordingOut, RecordingUpdateStatus, RecordingAttachTranscript
 from ..dependencies import get_recording_service, get_transcription_service
 from ..services.recording_service import RecordingService
-from ..services.transcription_service import TranscriptionService
+from ..services.transcription_service import TranscriptionService  # Importado pero no usado
 
 router = APIRouter(prefix="/recordings", tags=["recordings"])
 
@@ -41,13 +41,17 @@ def register_recording(
             detail=f"content_type '{payload.content_type}' no es soportado. "
                    f"Los tipos permitidos son: {', '.join(ALLOWED_CT)}"
         )
+
+    # CORRECCIÓN: Aseguramos que la lógica de content_type se pase correctamente
+    content_type_clean = "audio/wav" if payload.content_type == "audio/x-wav" else payload.content_type
+
     r = recording_service.register_upload(
         db,
         tenant=tenant,
         user=me,
         bucket=payload.bucket,
         key=payload.key,
-        content_type="audio/wav" if payload.content_type == "audio/x-wav" else payload.content_type,
+        content_type=content_type_clean,  # Usamos la variable limpia
         size_bytes=payload.size_bytes,
         duration_sec=payload.duration_sec,
     )

@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, status, HTTPException
+from typing import List
+from fastapi import APIRouter, Depends, status, HTTPException, Query, Response, BackgroundTasks
 from sqlalchemy.orm import Session
 from uuid import UUID
 from src.core.connections.deps import get_db, get_current_tenant, get_current_user
 from src.core.middlewares.permissions import require_roles
 from src.apps.recordings.services.recording_service import RecordingService
 from src.apps.recordings.dependencies import get_recording_service
-from src.core.errors.errors import EntityNotFoundError
+from src.core.errors.errors import EntityNotFoundError, ConflictError
 from .services import DocumentService
 from .repository import DocumentRepository
 from .schemas import DocumentGenerateIn, DocumentOut, DocumentContentUpdate
@@ -54,6 +55,33 @@ def generate_document(
     return DocumentOut.model_validate(doc)
 
 
+@router.get(
+    "",
+    response_model=List[DocumentOut],
+    summary="Listar documentos clínicos del tenant (para Reportes)",
+    dependencies=[Depends(require_roles("owner", "admin", "staff", "viewer"))],
+)
+def list_documents(
+        db: Session = Depends(get_db),
+        tenant=Depends(get_current_tenant),
+        q: str | None = Query(None, description="Buscar en título o contenido"),
+        document_type: str | None = Query(None, description="Filtrar por tipo de documento"),
+        page: int = Query(1, ge=1),
+        page_size: int = Query(50, ge=1, le=200),
+        doc_service: DocumentService = Depends(get_document_service),
+):
+    # NOTA: No calculamos total aquí para simplificar, pero el repositorio lo permite si se necesita la paginación completa.
+    rows = doc_service.list_documents(
+        db,
+        str(tenant.id),
+        q=q,
+        document_type=document_type,
+        page=page,
+        page_size=page_size
+    )
+    return [DocumentOut.model_validate(x) for x in rows]
+
+
 @router.put(
     "/{document_id}/content",
     response_model=DocumentOut,
@@ -73,8 +101,27 @@ def update_document_content(
         document_id=str(document_id),
         tenant_id=str(tenant.id),
         content=payload.content,
-        is_finalized=payload.is_finalized
+        is_finalized=payload.is_finalized,
+        is_synced=payload.is_synced
     )
     return DocumentOut.model_validate(doc)
 
 
+@router.post(
+    "/{document_id}/export",
+    response_model=DocumentOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Disparar exportación del documento finalizado al HIS/EMR",
+    dependencies=[Depends(require_roles("owner", "admin", "staff"))],
+)
+def export_document_to_his(
+        document_id: str,
+        background_tasks: BackgroundTasks,
+        db: Session = Depends(get_db),
+        tenant=Depends(get_current_tenant),
+        _=Depends(get_current_user),
+        doc_service: DocumentService = Depends(get_document_service),
+):
+    # El servicio se encarga de la lógica de sincronización asíncrona
+    updated_doc = doc_service.export_to_his(db, document_id, tenant, background_tasks)
+    return DocumentOut.model_validate(updated_doc)

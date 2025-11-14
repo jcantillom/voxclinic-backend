@@ -25,6 +25,8 @@ from src.apps.recordings.controllers.webhook_controller import router as webhook
 from src.apps.onboarding.controller import router as onboarding_router
 from src.apps.dashboard.controller import router as dashboard_router
 from src.apps.document.controllers import router as document_controller
+from src.apps.patients.controller import router as patient_controller
+from src.apps.schedule.controller import router as schedule_controller
 
 # -------------------------------------------------------------------
 log = logging.getLogger("app")
@@ -204,6 +206,18 @@ def create_app(config_name: str) -> FastAPI:
         document_controller,
         prefix="/api/v1",
         tags=["Documents"],
+    )
+
+    app.include_router(
+        patient_controller,
+        prefix="/api/v1",
+        tags=["Patients"],
+    )
+
+    app.include_router(
+        schedule_controller,
+        prefix="/api/v1",
+        tags=["Schedule"],
     )
 
     return app

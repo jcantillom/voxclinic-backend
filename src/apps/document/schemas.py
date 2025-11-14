@@ -23,6 +23,7 @@ class DocumentOut(BaseModel):
     content: str
     clinical_meta: Dict
     is_finalized: bool
+    is_synced: bool  # NUEVO
     created_at: datetime
     updated_at: datetime
 
@@ -30,3 +31,4 @@ class DocumentOut(BaseModel):
 class DocumentContentUpdate(BaseModel):
     content: str = Field(..., min_length=1)
     is_finalized: bool = Field(False)
+    is_synced: bool = Field(False)  # Permitir marcar como sincronizado

@@ -7,19 +7,21 @@ from src.apps.tenant.models import Tenant
 from src.apps.users.models import User
 from ..repository import RecordingRepository
 from ..models import Recording
+from sqlalchemy import cast, Integer
 
 
 class RecordingService:
     def __init__(self, repo: RecordingRepository):
         self.repo = repo
 
+    # CORRECCIÓN: El método debe existir aquí
     def register_upload(
             self, db: Session, *, tenant: Tenant, user: User,
             bucket: str, key: str, content_type: str, size_bytes: int | None, duration_sec: int | None
     ) -> Recording:
         """Crea el registro del audio recién subido"""
         try:
-            return self.repo.create(
+            return self.repo.create(  # Llama al repo
                 db,
                 tenant_id=tenant.id,
                 user_id=user.id if user else None,
@@ -75,41 +77,43 @@ class RecordingService:
     def get_dashboard_metrics(self, db: Session, tenant_id: str, user_id: str = None) -> dict:
         """Obtiene métricas reales para el dashboard"""
 
-        # CONSULTAS DE CONTEO - DEBEN USAR select(func.count(Recording.id))
+        # CONSULTAS DE CONTEO
 
-        base_query_completed = select(func.count(Recording.id)).where(
+        base_query_completed_count = select(func.count(Recording.id)).where(
             Recording.tenant_id == tenant_id,
             Recording.status == 'completed'
         )
-        base_query_total = select(func.count(Recording.id)).where(Recording.tenant_id == tenant_id)
+        base_query_total_count = select(func.count(Recording.id)).where(Recording.tenant_id == tenant_id)
 
         # Filtro por usuario (si aplica)
         if user_id:
-            base_query_completed = base_query_completed.where(Recording.user_id == user_id)
-            base_query_total = base_query_total.where(Recording.user_id == user_id)
+            base_query_completed_count = base_query_completed_count.where(Recording.user_id == user_id)
+            base_query_total_count = base_query_total_count.where(Recording.user_id == user_id)
 
         # Métrica: Documentos generados (completados) - Hoy
         today = datetime.now().date()
-        # CORRECCIÓN 1: Asegurar que se ejecuta la función de conteo.
         today_documents = db.execute(
-            base_query_completed.where(func.date(Recording.created_at) == today)
+            base_query_completed_count.where(func.date(Recording.created_at) == today)
         ).scalar_one_or_none() or 0
 
         # Métrica: Dictados procesados (todos los estados) - Total
-        # CORRECCIÓN 2: Asegurar que se ejecuta la función de conteo.
-        processed_total = db.execute(base_query_total).scalar_one_or_none() or 0
+        processed_total = db.execute(base_query_total_count).scalar_one_or_none() or 0
+
+        # Métrica: Dictados pendientes de revisión (Ej: status = 'uploaded' o 'processing')
+        pending_count = db.execute(
+            base_query_total_count.where(Recording.status.in_(['uploaded', 'processing']))
+        ).scalar_one_or_none() or 0
 
         # Tiempo ahorrado (suma de duración) - Total
         time_saved_sec = db.execute(
             select(func.coalesce(func.sum(Recording.duration_sec), 0))
             .where(Recording.tenant_id == tenant_id, Recording.status == 'completed')
-        ).scalar_one_or_none() or 0  # Uso de coalesce para asegurar 0
+        ).scalar_one_or_none() or 0
 
         # Calcular tendencias (vs últimos 30 días)
         thirty_days_ago = datetime.now() - timedelta(days=30)
 
         # Documentos completados en los últimos 30 días (CURRENT)
-        # CORRECCIÓN 3: Asegurar que se ejecuta la función de conteo.
         last_30_days_completed = db.execute(
             select(func.count(Recording.id))
             .where(
@@ -121,7 +125,6 @@ class RecordingService:
 
         # Documentos completados en los 30 días anteriores a ese período (PREVIOUS)
         sixty_days_ago = datetime.now() - timedelta(days=60)
-        # CORRECCIÓN 4: Asegurar que se ejecuta la función de conteo.
         previous_30_days_completed = db.execute(
             select(func.count(Recording.id))
             .where(
@@ -144,7 +147,7 @@ class RecordingService:
             "patients_served": {
                 "count": patients_count,
                 "trend": self._calculate_trend(last_30_days_completed, previous_30_days_completed),
-                "description": "Pacientes registrados hoy"
+                "description": "Pacientes atendidos hoy"
             },
             "time_saved": {
                 "count": self._format_time_saved(time_saved_sec),
@@ -154,7 +157,7 @@ class RecordingService:
             "recordings_processed": {
                 "count": processed_total,
                 "trend": self._calculate_trend(processed_total, previous_30_days_completed),
-                "description": "Dictados en sistema"
+                "description": f"{pending_count} pendiente(s) de revisión"
             }
         }
 

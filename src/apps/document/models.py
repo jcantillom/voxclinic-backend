@@ -12,6 +12,7 @@ DOCUMENT_TYPES = (
     "incapacity",
 )
 
+
 class Document(Base):
     __tablename__ = "document"
 
@@ -31,10 +32,14 @@ class Document(Base):
     clinical_meta = Column(JSONB, nullable=False, server_default='{}')
 
     is_finalized = Column(Boolean, nullable=False, server_default="false")
+
+    is_synced = Column(Boolean, nullable=False, server_default="false")
+
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
         Index("ix_document_tenant_user_type", "tenant_id", "user_id", "document_type"),
         Index("ix_document_tenant_recording", "tenant_id", "recording_id"),
+        Index("ix_document_synced", "is_synced"),
     )
