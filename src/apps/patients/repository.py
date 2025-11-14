@@ -40,7 +40,8 @@ class PatientRepository:
             )
 
         # Obtener el total
-        count_stmt = select(func.count(Patient.id)).select_from(stmt.alias())
+        # CORRECCIÓN: Usar .subquery() para el conteo y evitar el producto cartesiano (SAWarning)
+        count_stmt = select(func.count()).select_from(stmt.subquery())
         total = db.execute(count_stmt).scalar_one()
 
         offset = (page - 1) * page_size

@@ -87,7 +87,7 @@ def list_documents(
         q: str | None = Query(None, description="Buscar en título o contenido"),
         document_type: str | None = Query(None, description="Filtrar por tipo de documento"),
         page: int = Query(1, ge=1),
-        page_size: int = Query(5, ge=1, le=50),  # Establecemos 5 por defecto
+        page_size: int = Query(5, ge=1, le=50),  # CAMBIO: Establecemos 5 por defecto
         doc_service: DocumentService = Depends(get_document_service),
 ):
     rows, total = doc_service.list_documents(

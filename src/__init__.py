@@ -112,6 +112,7 @@ def create_app(config_name: str) -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Total-Count"],
     )
 
     # Debug request/response (solo si LOG_LEVEL=DEBUG)

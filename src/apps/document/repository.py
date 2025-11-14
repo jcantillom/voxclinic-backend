@@ -40,10 +40,9 @@ class DocumentRepository:
             )
 
         # 3. Obtener el total (COUNT)
-        # Usamos func.count(Document.id) para contar correctamente
-        count_stmt = select(func.count(Document.id)).select_from(
-            stmt.alias())  # Usar .alias() en lugar de .subquery() para consistencia
-        total = db.execute(count_stmt).scalar_one()
+        # CORRECCIÓN: Usar .subquery() para el conteo y evitar el producto cartesiano (SAWarning)
+        total_stmt = select(func.count()).select_from(stmt.subquery())
+        total = db.execute(total_stmt).scalar_one()
 
         # 4. Aplicar ordenamiento y paginación
         offset = (page - 1) * page_size
