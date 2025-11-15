@@ -133,7 +133,6 @@ class DocumentService:
 
         # CONSTRUCCIÓN DEL MEMBRETE EN EL TEXTO
         header = f"""
---- INFORME MÉDICO OFICIAL ---
 INSTITUCIÓN: {tenant.name}
 ID Legal: {legal_id}
 Dirección: {address}

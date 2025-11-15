@@ -23,7 +23,7 @@ class DocumentRepository:
     ) -> Document:
         doc.content = content
         doc.is_finalized = is_finalized
-        doc.is_synced = is_synced  # Aseguramos que se pueda resetear si se edita
+        doc.is_synced = is_synced
         db.flush()
         db.refresh(doc)
         return doc
@@ -38,24 +38,17 @@ class DocumentRepository:
         # 1. Crear la base de la sentencia de selección
         stmt = select(Document).where(Document.tenant_id == tenant_id)
 
-        # 2. Aplicar filtros (si existen)
         if document_type:
             stmt = stmt.where(Document.document_type == document_type)
 
         if q:
-            # Búsqueda por título o contenido (ilike es sensible a Postgres)
-            # Aseguramos que la búsqueda por 'q' siempre use minúsculas
             search_term = f"%{q.lower()}%"
             stmt = stmt.where(
                 (Document.title.ilike(search_term)) | (Document.content.ilike(search_term))
             )
-
-        # 3. Obtener el total (COUNT)
-        # CORRECCIÓN: Usar .subquery() para el conteo y evitar el producto cartesiano (SAWarning)
         total_stmt = select(func.count()).select_from(stmt.subquery())
         total = db.execute(total_stmt).scalar_one()
 
-        # 4. Aplicar ordenamiento y paginación
         offset = (page - 1) * page_size
         rows = db.execute(
             stmt.order_by(Document.created_at.desc()).offset(offset).limit(page_size)

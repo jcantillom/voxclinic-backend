@@ -1,7 +1,6 @@
 import os
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
-# Asegúrate de que get_current_tenant esté importado
 from src.core.connections.deps import get_db, get_current_tenant, get_current_user
 from .schemas import LoginInput, TokenOut
 from src.apps.auth.services import AuthService
