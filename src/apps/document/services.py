@@ -48,9 +48,10 @@ class DocumentService:
         # --- Lógica de Generación Estructurada (Simulada) ---
         title = f"{document_type.replace('_', ' ').title()} generado"
 
+        # PASAR EL OBJETO TENANT COMPLETO
         structured_content = self._structure_document(
             document_type,
-            tenant.name,
+            tenant,  # PASAMOS EL OBJETO TENANT
             user.full_name,
             transcript,
             clinical_meta
@@ -119,29 +120,36 @@ class DocumentService:
         return doc
 
     def _structure_document(
-            self, doc_type: str, tenant_name: str, doctor_name: str, transcript: str, meta: dict
+            # CAMBIO: Recibimos el objeto Tenant en lugar de solo el nombre
+            self, doc_type: str, tenant: Tenant, doctor_name: str, transcript: str, meta: dict
     ) -> str:
         """Simula la generación de contenido estructurado (MVP)."""
         patient_info = meta.get('patient_id', 'N/A')
         clinical_subject = meta.get('clinical_subject', 'Sin foco')
 
+        # OBTENEMOS LA METADATA
+        address = tenant.meta.get('address', 'Dirección no configurada')
+        legal_id = tenant.meta.get('legal_id', 'ID Legal N/A')
+
+        # CONSTRUCCIÓN DEL MEMBRETE EN EL TEXTO
         header = f"""
-{tenant_name} | 
-DOCUMENTO MÉDICO: {doc_type.upper().replace('_', ' ')}
+--- INFORME MÉDICO OFICIAL ---
+INSTITUCIÓN: {tenant.name}
+ID Legal: {legal_id}
+Dirección: {address}
+DOCUMENTO TIPO: {doc_type.upper().replace('_', ' ')}
 PACIENTE ID: {patient_info}
-MÉDICO: {doctor_name}
 ASUNTO: {clinical_subject}
-FECHA: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-        """
-        footer = f"\n\n--- FIN DEL INFORME ---\n[ESTADO: FINALIZADO Y PENDIENTE DE SINCRONIZACIÓN HIS]\n"
+"""
+        footer = f"\n\n--- FIN DEL INFORME ---\n[VALIDADO POR: {doctor_name} | SINCRONIZACIÓN HIS PENDIENTE]\n"
 
         if doc_type == "radiology_report":
-            return f"{header}\nINFORME RADIOLÓGICO\n\nHALLAZGOS:\n{transcript}\n\nIMPRESIÓN DIAGNÓSTICA:\n[Generada por IA - Revisar]\n{footer}"
+            return f"{header}\nINFORME RADIOLÓGICO\n\nHALLAZGOS:\n{transcript}\n\nIMPRESIÓN DIAGNÓSTICA:\n[Generada por IA - Revisar]{footer}"
 
         if doc_type == "clinical_history":
             return f"{header}\nHISTORIA CLÍNICA\n\nMOTIVO DE CONSULTA:\n{clinical_subject}\n\nANAMNESIS DETALLADA:\n{transcript}\n\nPLAN:\n[Generado por IA - Revisar]{footer}"
 
-        return f"{header}\nTRANSCRIPCIÓN:\n{transcript}{footer}"
+        return f"{header}\nTRANSCRIPCIÓN DETALLADA:\n{transcript}{footer}"
 
     def get_by_id(self, db: Session, document_id: str) -> Document:
         doc = self.repo.get_by_id(db, document_id)

@@ -1,7 +1,7 @@
-# src/apps/auth/controller.py
 import os
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
+# Asegúrate de que get_current_tenant esté importado
 from src.core.connections.deps import get_db, get_current_tenant, get_current_user
 from .schemas import LoginInput, TokenOut
 from src.apps.auth.services import AuthService
@@ -24,7 +24,8 @@ def login(payload: LoginInput, db: Session = Depends(get_db), tenant=Depends(get
 
 
 @router.get("/me", summary="Usuario actual (token)", status_code=200)
-def me(user=Depends(get_current_user)):
+# CORRECCIÓN CLAVE: Inyectar 'tenant' como dependencia
+def me(user=Depends(get_current_user), tenant=Depends(get_current_tenant)):
     # Devuelve algo compacto y útil
     return {
         "id": str(user.id),
@@ -34,6 +35,11 @@ def me(user=Depends(get_current_user)):
         "tenant_id": str(user.tenant_id),
         "is_active": user.is_active,
         "last_login": user.last_login,
+        "tenant_info": { # Incluir la metadata del Tenant
+            "name": tenant.name,
+            "code": tenant.code,
+            "meta": tenant.meta
+        }
     }
 
 
