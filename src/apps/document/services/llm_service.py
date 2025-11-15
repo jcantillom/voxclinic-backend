@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from typing import Dict, Any
+# Importaciones para Gemini
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError
@@ -11,34 +12,30 @@ from src.core.errors.errors import ConflictError
 logger = logging.getLogger(__name__)
 
 
-# Definición de la Interfaz del Motor LLM (Se mantiene inalterada)
 class AbstractLLMEngine(abc.ABC):
     """
-    Define la interfaz para cualquier motor de IA/LLM que estructure el dictado médico.
+    Define la interfaz para cualquier motor de IA/LLM.
     """
 
     @abc.abstractmethod
     def structure_document(self, document_type: str, transcript: str, clinical_meta: Dict[str, Any]) -> str:
-        """
-        Toma la transcripción y los metadatos y devuelve el contenido estructurado final.
-        """
         raise NotImplementedError
 
 
 # Implementación de LLM (NUBE): Google Gemini
 class GeminiLlmEngine(AbstractLLMEngine):
     """
-    Implementación del motor LLM utilizando la API de Google Gemini para estructurar
-    documentación clínica.
+    Implementación del motor LLM utilizando la API de Google Gemini.
     """
 
     def __init__(self):
+        # CAMBIO: Usamos las variables de entorno de Gemini
         self.api_key = os.getenv("GEMINI_API_KEY")
         self.model = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
 
-        if not self.api_key or self.api_key == "YOUR_GEMINI_API_KEY_HERE":
+        if not self.api_key:
             logger.error("GEMINI_API_KEY no configurada.")
-            raise ValueError("GEMINI_API_KEY no está configurada. Revise su archivo .env.")
+            raise ValueError("GEMINI_API_KEY no está configurada. Necesaria para la integración de LLM.")
 
         try:
             self.client = genai.Client(api_key=self.api_key)
@@ -46,14 +43,18 @@ class GeminiLlmEngine(AbstractLLMEngine):
             logger.error(f"Error inicializando cliente Gemini: {e}")
             raise ValueError(f"Error en credenciales Gemini: {e}")
 
+    # [Resto de los métodos _generate_prompt y structure_document con la lógica de conexión Gemini]
+    # ... (Se asume que esta lógica es la que generó el informe estructurado) ...
     def _generate_prompt(self, document_type: str, transcript: str, clinical_meta: Dict[str, Any]) -> str:
-        """Genera el prompt de sistema y las instrucciones para el LLM."""
+        """Genera el prompt de sistema y las instrucciones para el LLM con restricciones."""
 
         system_instruction = (
             "Usted es un experto en documentación médica que opera bajo estándares HIPAA/ISO. "
             "Su tarea es corregir la transcripción (que puede tener errores fonéticos, ejemplo: 'ante lo poste' por 'anteroposterior') "
             "a español médico **formal y correcto**, y estructurar el contenido en formato **Markdown** según el tipo de documento. "
-            "La salida DEBE ser solo el contenido en Markdown, sin preámbulos ni encabezados de tipo 'Aquí está el informe'."
+            "LA SALIDA DEBE SER SOLO EL CUERPO CLÍNICO ESTRUCTURADO. "
+            "NO INCLUYA EN LA RESPUESTA EL NOMBRE DEL PACIENTE, ID, MÉDICO O INSTITUCIÓN, "
+            "ya que esta metadata se añade por la plantilla de DataVox Medical."
         )
 
         meta_info = json.dumps(clinical_meta, indent=2)
@@ -65,8 +66,10 @@ class GeminiLlmEngine(AbstractLLMEngine):
                 "1. **TÉCNICA** (si fue dictada, sino sugiere una estándar). "
                 "2. **HALLAZGOS DETALLADOS**. "
                 "3. **IMPRESIÓN DIAGNÓSTICA / CONCLUSIÓN**. "
+                "4. **RECOMENDACIONES** (si aplica). "
                 f"La transcripción es: '{transcript}'."
             )
+        # ... [Resto de la lógica de prompt] ...
         elif document_type == "clinical_history":
             instructions = (
                 "Estructura el dictado para rellenar una Historia Clínica. "
@@ -88,7 +91,7 @@ class GeminiLlmEngine(AbstractLLMEngine):
 SISTEMA: {system_instruction}
 
 ---
-DATOS CLÍNICOS ADICIONALES:
+DATOS CLÍNICOS DISPONIBLES (NO REPETIR EN LA SALIDA):
 {meta_info}
 ---
 INSTRUCCIÓN ESPECÍFICA:
@@ -109,7 +112,7 @@ INSTRUCCIÓN ESPECÍFICA:
                 model=self.model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.01,  # Baja temperatura para respuestas factuales/estructuradas
+                    temperature=0.01,
                 )
             )
 
