@@ -8,14 +8,15 @@ from src.apps.recordings.services.recording_service import RecordingService
 from src.apps.recordings.dependencies import get_recording_service
 from src.core.errors.errors import EntityNotFoundError, ConflictError
 from src.apps.document.services.document_services import DocumentService
-from .repository import DocumentRepository
+from src.apps.document.dependencies import get_document_service # <-- Importamos la que tiene inyección
 from .schemas import DocumentGenerateIn, DocumentOut, DocumentContentUpdate
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
 
-def get_document_service() -> DocumentService:
-    return DocumentService(DocumentRepository())
+# ELIMINAMOS la función local get_document_service() antigua
+# def get_document_service() -> DocumentService:
+#     return DocumentService(DocumentRepository())
 
 
 @router.post(
@@ -31,7 +32,7 @@ def generate_document(
         tenant=Depends(get_current_tenant),
         user=Depends(get_current_user),
         recording_service: RecordingService = Depends(get_recording_service),
-        doc_service: DocumentService = Depends(get_document_service),
+        doc_service: DocumentService = Depends(get_document_service), # <--- USO DE DEPENDENCIA INYECTADA
 ):
     recording = recording_service.get(db, payload.recording_id)
     if not recording or str(recording.tenant_id) != str(tenant.id):
@@ -55,7 +56,8 @@ def generate_document(
     return DocumentOut.model_validate(doc)
 
 
-# NUEVO ENDPOINT: Obtener documento por ID
+# [El resto de las rutas GET/PUT/POST en este archivo usan doc_service = Depends(get_document_service) y se mantienen intactas]
+
 @router.get(
     "/{document_id}",
     response_model=DocumentOut,

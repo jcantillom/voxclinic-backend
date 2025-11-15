@@ -23,8 +23,8 @@ class Environment(BaseSettings):
     AWS_REGION: str
     S3_BUCKET_AUDIO: str
     AWS_PROFILE: str
-    LLM_HOST_URL: str
-    LLM_MODEL_NAME: str
+    GEMINI_API_KEY: str
+    GEMINI_MODEL: str
 
 
     class Config:

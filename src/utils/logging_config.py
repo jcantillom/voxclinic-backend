@@ -9,7 +9,8 @@ def build_logging_config():
       - Colores opcionales con LOG_COLOR=1 (requiere 'colorlog')
       - Nivel controlado con LOG_LEVEL (DEBUG/INFO/WARNING/ERROR)
     """
-    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+    # CAMBIO: Usamos 'DEBUG' si no está definido para facilitar la depuración
+    LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
     USE_COLOR = os.getenv("LOG_COLOR", "0") == "1"
 
     BASE_FORMAT = "[%(levelname)s] [%(asctime)s] [%(filename)s:%(lineno)d] %(message)s"
@@ -58,24 +59,24 @@ def build_logging_config():
             # Root (tu app)
             "": {
                 "handlers": ["console"],
-                "level": LOG_LEVEL,
+                "level": LOG_LEVEL,  # <-- Usa el nivel DEBUG/INFO/etc
                 "propagate": False,
             },
 
             # Uvicorn: error + access
             "uvicorn": {
                 "handlers": ["console"],
-                "level": LOG_LEVEL,
+                "level": LOG_LEVEL,  # <-- Usa el nivel DEBUG/INFO/etc
                 "propagate": False,
             },
             "uvicorn.error": {
                 "handlers": ["console"],
-                "level": LOG_LEVEL,
+                "level": LOG_LEVEL,  # <-- Usa el nivel DEBUG/INFO/etc
                 "propagate": False,
             },
             "uvicorn.access": {
                 "handlers": ["console"],
-                "level": LOG_LEVEL,
+                "level": LOG_LEVEL,  # <-- Usa el nivel DEBUG/INFO/etc
                 "propagate": False,
             },
         },

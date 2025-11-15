@@ -2,8 +2,10 @@ import abc
 import json
 import logging
 import os
-import requests  # Necesario para llamar a la API REST de Ollama
-from typing import Dict, Any, Union
+from typing import Dict, Any
+from google import genai
+from google.genai import types
+from google.genai.errors import APIError
 from src.core.errors.errors import ConflictError
 
 logger = logging.getLogger(__name__)
@@ -23,43 +25,44 @@ class AbstractLLMEngine(abc.ABC):
         raise NotImplementedError
 
 
-# Implementación de LLM: Ollama (Llama 3)
-class OllamaLlmEngine(AbstractLLMEngine):
+# Implementación de LLM (NUBE): Google Gemini
+class GeminiLlmEngine(AbstractLLMEngine):
     """
-    Implementación del motor LLM utilizando la API REST de Ollama para la inferencia
-    de modelos Open Source (Llama 3).
+    Implementación del motor LLM utilizando la API de Google Gemini para estructurar
+    documentación clínica.
     """
 
     def __init__(self):
-        self.api_url = os.getenv("LLM_HOST_URL")
-        self.model = os.getenv("LLM_MODEL_NAME")
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        self.model = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
 
-        if not self.api_url or not self.model:
-            logger.error("LLM_HOST_URL o LLM_MODEL_NAME no configurados.")
-            raise ValueError("Configuración de LLM (Ollama) faltante. Revise su archivo .env.")
+        if not self.api_key or self.api_key == "YOUR_GEMINI_API_KEY_HERE":
+            logger.error("GEMINI_API_KEY no configurada.")
+            raise ValueError("GEMINI_API_KEY no está configurada. Revise su archivo .env.")
 
-        # Endpoint específico para generación de contenido en Ollama
-        self.generate_endpoint = f"{self.api_url}/generate"
+        try:
+            self.client = genai.Client(api_key=self.api_key)
+        except Exception as e:
+            logger.error(f"Error inicializando cliente Gemini: {e}")
+            raise ValueError(f"Error en credenciales Gemini: {e}")
 
     def _generate_prompt(self, document_type: str, transcript: str, clinical_meta: Dict[str, Any]) -> str:
-        """Genera el prompt de sistema y las instrucciones para Llama 3."""
+        """Genera el prompt de sistema y las instrucciones para el LLM."""
 
-        # PROMPT AVANZADO: Instrucciones de rol para el LLM
         system_instruction = (
-            "Usted es un experto en documentación médica que opera dentro de un ambiente de alta seguridad (HIPAA/ISO). "
-            "Su tarea es corregir la transcripción de audio (que puede contener errores fonéticos, ejemplo: 'ante lo poste' por 'anteroposterior') "
-            "a español médico **formal y correcto**, y luego estructurar el contenido en formato **Markdown**. "
+            "Usted es un experto en documentación médica que opera bajo estándares HIPAA/ISO. "
+            "Su tarea es corregir la transcripción (que puede tener errores fonéticos, ejemplo: 'ante lo poste' por 'anteroposterior') "
+            "a español médico **formal y correcto**, y estructurar el contenido en formato **Markdown** según el tipo de documento. "
             "La salida DEBE ser solo el contenido en Markdown, sin preámbulos ni encabezados de tipo 'Aquí está el informe'."
         )
 
         meta_info = json.dumps(clinical_meta, indent=2)
 
-        # Instrucciones de estructura basadas en el tipo de documento
         if document_type == "radiology_report":
             instructions = (
                 "Estructura el dictado como un Informe Radiológico profesional. "
                 "Usa los siguientes encabezados en Markdown: "
-                "1. **TÉCNICA** (si fue dictada, sino sugiere una común). "
+                "1. **TÉCNICA** (si fue dictada, sino sugiere una estándar). "
                 "2. **HALLAZGOS DETALLADOS**. "
                 "3. **IMPRESIÓN DIAGNÓSTICA / CONCLUSIÓN**. "
                 f"La transcripción es: '{transcript}'."
@@ -95,54 +98,29 @@ INSTRUCCIÓN ESPECÍFICA:
 
     def structure_document(self, document_type: str, transcript: str, clinical_meta: Dict[str, Any]) -> str:
         """
-        Llama a la API de Ollama para obtener el documento estructurado con Llama 3.
+        Llama a la API de Gemini para obtener el documento estructurado.
         """
         prompt = self._generate_prompt(document_type, transcript, clinical_meta)
 
-        # Payload para la API de generación de Ollama
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,  # Desactivamos el streaming para obtener la respuesta completa
-            "options": {
-                "temperature": 0.01,  # Baja temperatura para alta precisión y consistencia
-            }
-        }
-
         try:
-            logger.info(f"Llamando a Ollama (Llama 3) en {self.generate_endpoint} para {document_type}...")
+            logger.info(f"Llamando a Gemini (Nube) con modelo {self.model} para {document_type}...")
 
-            response = requests.post(
-                self.generate_endpoint,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=90  # 90 segundos para permitir inferencia lenta
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.01,  # Baja temperatura para respuestas factuales/estructuradas
+                )
             )
-            response.raise_for_status()  # Lanza error para códigos HTTP 4xx/5xx
 
-            data = response.json()
-
-            # El campo 'response' contiene la salida del LLM
-            generated_text = data.get("response", "").strip()
-
-            if generated_text:
-                return generated_text
+            if response.text:
+                return response.text
             else:
-                raise ConflictError("Respuesta de Llama 3 vacía o no generada correctamente.")
+                raise APIError("Respuesta de Gemini vacía o bloqueada por seguridad.")
 
-        except requests.exceptions.Timeout:
-            logger.error("Timeout de la API de Ollama: La inferencia tardó demasiado.")
-            raise ConflictError("Error en el motor LLM (Timeout): El servidor de Llama 3 tardó demasiado en responder.")
-        except requests.exceptions.ConnectionError:
-            logger.error(f"Error de conexión con Ollama en {self.generate_endpoint}. ¿Está el servicio corriendo?")
-            raise ConflictError(
-                "Error en el motor LLM: El servidor de Ollama no está corriendo. Verifique `ollama run llama3`.")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error de la API de Ollama: {e}")
-            raise ConflictError(f"Error en el motor LLM (Ollama API): No se pudo generar el documento. Detalle: {e}")
+        except APIError as e:
+            logger.error(f"Error de la API de Gemini: {e}")
+            raise ConflictError(f"Error en el motor de IA (Gemini API): No se pudo generar el documento. Detalle: {e}")
         except Exception as e:
-            logger.exception(f"Error inesperado al procesar la respuesta de Ollama: {e}")
-            raise ConflictError(f"Error interno al procesar la respuesta del LLM. Detalle: {e}")
-
-# Mantenemos MvpLlmEngine (Simulación) si lo necesita como fallback, o lo eliminamos.
-# Para un proyecto real, lo eliminamos.
+            logger.exception(f"Error inesperado al conectar con Gemini: {e}")
+            raise ConflictError(f"Error interno al conectar con el servicio LLM. Detalle: {e}")
