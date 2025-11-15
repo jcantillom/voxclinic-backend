@@ -5,8 +5,8 @@ from src.apps.tenant.models import Tenant
 from src.apps.users.models import User
 from src.apps.recordings.models import Recording
 from src.core.errors.errors import EntityNotFoundError, ConflictError
-from .repository import DocumentRepository
-from .models import Document
+from src.apps.document.repository import DocumentRepository
+from src.apps.document.models import Document
 from datetime import datetime
 from typing import Optional, Sequence, Tuple
 from fastapi import BackgroundTasks

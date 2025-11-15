@@ -23,6 +23,9 @@ class Environment(BaseSettings):
     AWS_REGION: str
     S3_BUCKET_AUDIO: str
     AWS_PROFILE: str
+    LLM_HOST_URL: str
+    LLM_MODEL_NAME: str
+
 
     class Config:
         env_file = os.path.join(os.getcwd(), ".env")

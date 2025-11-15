@@ -7,7 +7,7 @@ from src.core.middlewares.permissions import require_roles
 from src.apps.recordings.services.recording_service import RecordingService
 from src.apps.recordings.dependencies import get_recording_service
 from src.core.errors.errors import EntityNotFoundError, ConflictError
-from .services import DocumentService
+from src.apps.document.services.document_services import DocumentService
 from .repository import DocumentRepository
 from .schemas import DocumentGenerateIn, DocumentOut, DocumentContentUpdate
 

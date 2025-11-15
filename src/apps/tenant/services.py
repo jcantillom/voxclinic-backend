@@ -1,4 +1,4 @@
-# src/apps/tenant/services.py
+# src/apps/tenant/document_services.py
 from typing import Sequence, Optional
 from sqlalchemy.orm import Session
 from .repository import TenantRepository
